@@ -1,25 +1,18 @@
-import 'dart:async';
-import 'dart:io'; // File 클래스를 사용하기 위해 추가
+import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart'; // image_picker 추가
-import '../services/detector.dart';
+import 'package:image_picker/image_picker.dart';
+import '../services/detector_service.dart';
+import '../models/pcb_defect_models.dart';
 import '../services/ai_advisor.dart';
 import '../services/report_generator.dart';
-
-class CapturedImage {
-  final String imagePath;
-  final List<DetectedDefect> defects;
-  final DateTime timestamp;
-  final String description;
-
-  CapturedImage({
-    required this.imagePath,
-    required this.defects,
-    required this.timestamp,
-    required this.description,
-  });
-}
+import '../models/captured_image.dart';
+import '../services/detect_page_controller.dart';
+import '../services/photo_saver.dart';
+import '../widgets/stream_viewport.dart';
+import '../widgets/control_panel.dart';
+import '../widgets/defect_summary_panel.dart';
+import '../widgets/ai_response_panel.dart';
 
 class DetectPage extends StatefulWidget {
   const DetectPage({super.key});
@@ -30,6 +23,7 @@ class DetectPage extends StatefulWidget {
 
 class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   final DetectorService _detector = DetectorService();
+  late final DetectPageController _pageController;
   final AiAdvisorService _advisor = AiAdvisorService();
   final ReportGenerator _report = ReportGenerator();
 
@@ -40,109 +34,245 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   bool _isDetecting = false;
   List<DetectedDefect> _latest = const [];
   String? _advisorText;
-  DateTime? _lastDetectionTime;
   bool _isInitializingCamera = false;
+  bool _isGalleryMode = false; // 갤러리 모드 여부
   
-  // 갤러리에서 선택된 이미지를 표시하기 위한 변수
+  // 프레임 처리량 제한을 위한 변수들
+  bool _inferenceBusy = false;
+  int _lastInferMs = 0;
+  static const int _minIntervalMs = 80; // ≈12.5 FPS
+  
   XFile? _galleryImage;
-
-  // 촬영한 사진과 탐지 결과 저장
+  XFile? _capturedImage; // 촬영한 이미지 저장
   List<CapturedImage> _capturedImages = [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pageController = DetectPageController(_detector);
     _initialize();
   }
 
   Future<void> _initialize() async {
     try {
-      print('📱 카메라 목록 확인 중...');
       _cameras = await availableCameras();
       await _detector.initialize();
-      print('✅ 초기화 완료!');
       setState(() {});
     } catch (e) {
-      print('❌ 초기화 오류: $e');
+      print('초기화 오류: $e');
     }
   }
 
   Future<void> _initializeCamera() async {
-    if (_isCameraInitialized || _cameras.isEmpty || _isInitializingCamera) return;
+    if (_isCameraInitialized || _isInitializingCamera) return;
+    
+    if (_cameras.isEmpty) {
+      print('카메라 목록이 비어있습니다. 카메라 목록을 다시 가져옵니다.');
+      try {
+        _cameras = await availableCameras();
+        if (_cameras.isEmpty) {
+          print('사용 가능한 카메라가 없습니다.');
+          return;
+        }
+      } catch (e) {
+        print('카메라 목록 가져오기 실패: $e');
+        return;
+      }
+    }
     
     try {
       _isInitializingCamera = true;
-      print('📷 카메라 초기화 중...');
-      final back = _cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.back, orElse: () => _cameras.first);
-      _camera = CameraController(back, ResolutionPreset.medium, enableAudio: false);
-      await _camera!.initialize();
-      print('✅ 카메라 준비 완료!');
-      setState(() => _isCameraInitialized = true);
+      print('카메라 초기화 시작');
+      setState(() {}); // 초기화 시작 상태 업데이트
+      
+      _camera = await _pageController.initCamera(_cameras);
+      if (_camera == null) {
+        throw Exception('카메라 컨트롤러 생성 실패');
+      }
+      
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+          _isInitializingCamera = false;
+        });
+        print('카메라 초기화 완료');
+      }
     } catch (e) {
-      print('❌ 카메라 초기화 오류: $e');
-    } finally {
-      _isInitializingCamera = false;
+      print('카메라 초기화 오류: $e');
+      if (mounted) {
+        setState(() {
+          _isInitializingCamera = false;
+        });
+      }
     }
   }
 
   Future<void> _disposeCamera() async {
+    if (_camera == null) return;
+    
+    // 먼저 탐지 중지
+    await _stopDetect();
+    
     try {
-      await _stopDetect();
-      await _camera?.dispose();
+      // 카메라 컨트롤러 안전하게 해제
+      if (_camera!.value.isInitialized) {
+        await _pageController.disposeCamera(_camera);
+        print('📹 카메라 컨트롤러 해제 완료');
+      }
     } catch (e) {
       print('⚠️ 카메라 dispose 오류: $e');
     } finally {
       _camera = null;
       if (mounted) {
-        setState(() => _isCameraInitialized = false);
+        setState(() {
+          _isCameraInitialized = false;
+          _isDetecting = false;
+        });
       } else {
         _isCameraInitialized = false;
+        _isDetecting = false;
       }
     }
+  }
+
+  Future<void> _startDetectAndCamera() async {
+    if (_isDetecting) return;
+    // 갤러리/촬영 이미지 해제 후 카메라 미리보기로 전환
+    setState(() {
+      _galleryImage = null;
+      _capturedImage = null;
+      _isGalleryMode = false;
+      _latest = [];
+    });
+    // 카메라가 초기화되지 않았다면 먼저 초기화
+    if (!_isCameraInitialized) {
+      await _initializeCamera();
+      if (!_isCameraInitialized) return;
+    }
+    // 탐지 시작
+    await _startDetect();
+  }
+
+  Future<void> _captureAndStop() async {
+    if (!_isDetecting) return;
+    
+    // 사진 촬영 후 탐지 중지 (카메라는 유지)
+    await _capturePhoto();
+    await _stopDetect();
+    // 카메라는 유지하여 촬영한 이미지를 계속 표시
   }
 
   Future<void> _startDetect() async {
     if (_camera == null || !_isCameraInitialized || _isDetecting) return;
+    
     setState(() => _isDetecting = true);
-    await _camera!.startImageStream((CameraImage image) async {
-      if (!_isDetecting) return;
+    _inferenceBusy = false; // 추론 상태 초기화
+    _lastInferMs = 0; // 마지막 추론 시간 초기화
+    
+    // CameraPreview에서 주기적으로 이미지 캡처하여 탐지
+    _startPreviewDetection();
+  }
+
+  void _startPreviewDetection() {
+    if (!_isDetecting) return;
+    
+    // 200ms마다 CameraPreview에서 이미지 캡처하여 탐지
+    Future.delayed(const Duration(milliseconds: 200), () async {
+      if (!_isDetecting || _camera == null || !_isCameraInitialized) return;
       
-      // 성능 최적화: 탐지 빈도 제한 (3초마다)
-      final now = DateTime.now();
-      if (_lastDetectionTime != null && 
-          now.difference(_lastDetectionTime!).inMilliseconds < 3000) {
+      // 카메라 컨트롤러 상태 확인
+      if (!_camera!.value.isInitialized) {
+        print('⚠️ 카메라가 초기화되지 않음, 탐지 중지');
         return;
       }
-      _lastDetectionTime = now;
       
-           try {
-             // YUV 전체 이미지를 사용하여 정확도 높은 탐지 수행
-             final results = await _detector.detectOnFrame(cameraImage: image);
-             print('📱 UI 업데이트: ${results.length}개 탐지 결과 받음');
-             setState(() => _latest = results);
-             print('📱 UI 상태 업데이트 완료: _latest.length = ${_latest.length}');
-           } catch (e) {
-             print('❌ 탐지 오류: $e');
-           }
+      // 처리량 제한: 추론 중이거나 최소 간격 미달 시 스킵
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (_inferenceBusy || now - _lastInferMs < _minIntervalMs) {
+        _startPreviewDetection(); // 다음 주기로 계속
+        return;
+      }
+      
+      _inferenceBusy = true;
+      _lastInferMs = now;
+      
+      try {
+        // CameraPreview에서 이미지 캡처 (임시 파일)
+        final image = await _camera!.takePicture();
+        print('🔍 CameraPreview 캡처: ${image.path}');
+        
+        // 캡처한 이미지로 탐지 수행 (CameraPreview와 동일한 해상도)
+        final results = await _pageController.detectOnImagePath(image.path);
+        print('🔍 탐지 완료 - 결과: ${results.length}개');
+        
+        if (mounted && _isDetecting) {
+          setState(() {
+            _latest = results;
+          });
+        }
+        
+        // 임시 파일 삭제
+        try {
+          await File(image.path).delete();
+        } catch (e) {
+          print('⚠️ 임시 파일 삭제 실패: $e');
+        }
+        
+      } catch (e) {
+        debugPrint('탐지 오류: $e');
+        // 카메라 오류 시 탐지 중지
+        if (e.toString().contains('Disposed CameraController') || 
+            e.toString().contains('CameraException')) {
+          print('❌ 카메라 오류로 인한 탐지 중지');
+          await _stopDetect();
+        }
+      } finally {
+        _inferenceBusy = false;
+        if (_isDetecting) {
+          _startPreviewDetection(); // 다음 주기로 계속
+        }
+      }
     });
   }
 
   Future<void> _stopDetect() async {
-    if (_camera == null || !_isDetecting) return;
+    if (!_isDetecting) return;
+    
     setState(() => _isDetecting = false);
-    try {
-      await _camera!.stopImageStream();
-      print('🛑 탐지 중지됨');
-    } catch (e) {
-      print('⚠️ 탐지 중지 오류: $e');
+    _inferenceBusy = false; // 추론 상태 초기화
+    
+    // 카메라가 유효한 경우에만 스트림 중지
+    if (_camera != null && _isCameraInitialized) {
+      try {
+        if (_camera!.value.isStreamingImages) {
+          await _camera!.stopImageStream();
+          print('📹 카메라 스트림 중지 완료');
+        }
+      } catch (e) {
+        print('⚠️ 카메라 스트림 중지 오류: $e');
+      }
     }
   }
 
   Future<void> _askAi() async {
-    final label = _latest.isNotEmpty ? _latest.first.label : 'Short_circuit';
-    final text = await _advisor.askAdvisor(defectLabel: label);
-    setState(() => _advisorText = text);
+    try {
+      print('🤖 AI 문의 시작');
+      final validDefects = _latest;
+      final label = validDefects.isNotEmpty ? validDefects.first.label : 'Short_circuit';
+      print('🔍 탐지된 결함 라벨: $label');
+      print('📊 현재 유효한 탐지 결과 개수: ${validDefects.length}');
+      
+      final text = await _advisor.askAdvisor(defectLabel: label);
+      print('✅ AI 응답 받음: ${text.length}자');
+      print('📝 AI 응답 내용: $text');
+      
+      setState(() => _advisorText = text);
+      print('🎯 UI 업데이트 완료');
+    } catch (e) {
+      print('❌ AI 문의 오류: $e');
+      setState(() => _advisorText = 'AI 응답을 가져오는 중 오류가 발생했습니다: $e');
+    }
   }
 
   Future<void> _capturePhoto() async {
@@ -160,29 +290,58 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     }
     
     try {
+      // 1. 사진 촬영
       final image = await _camera!.takePicture();
+      print('📸 사진 촬영 완료: ${image.path}');
       
-      // 현재 탐지된 결함들을 설명으로 생성
-      String description = _generateDefectDescription(_latest);
+      // 2. 실시간 탐지 및 카메라 리소스 완전 해제
+      if (_isDetecting) {
+        await _stopDetect();
+        print('⏹️ 실시간 탐지 중지');
+      }
+      // 프리뷰/이미지리더까지 포함한 카메라 리소스를 모두 해제하여 버퍼 릴리즈
+      if (_isCameraInitialized) {
+        await _disposeCamera();
+        print('🧹 카메라 완전 해제(프리뷰/이미지 스트림 포함)');
+      }
       
-      // 촬영한 사진과 탐지 결과를 저장
-      final capturedImage = CapturedImage(
-        imagePath: image.path,
-        defects: List.from(_latest),
-        timestamp: DateTime.now(),
-        description: description,
-      );
+      // 3. 촬영한 사진을 별도로 탐지 (시스템 안정화를 위한 지연)
+      print('🔍 촬영한 사진 탐지 시작');
+      await Future.delayed(const Duration(milliseconds: 300));
+      final capturedDefects = await _pageController.detectOnImagePath(image.path);
+      print('✅ 촬영한 사진 탐지 완료: ${capturedDefects.length}개 결함 발견');
+      
+      // 4. 촬영한 이미지의 탐지 결과는 원본 좌표 그대로 사용 (실시간만 회전 적용)
+      final transformedDefects = capturedDefects;
+      
+      // 5. 촬영한 사진을 저장소에 저장
+      print('🔄 사진 저장 시작...');
+      final savedPath = await PhotoSaver.savePhotoToGallery(image);
+      if (savedPath != null) {
+        print('✅ 사진 저장 성공: $savedPath');
+      } else {
+        print('❌ 사진 저장 실패');
+      }
+      
+      // 6. 촬영한 사진과 탐지 결과를 저장
+      final capturedImage = await _pageController.buildCaptured(image.path, transformedDefects);
       
       setState(() {
         _capturedImages.add(capturedImage);
+        _capturedImage = image; // 촬영한 이미지 저장하여 계속 표시
+        _latest = capturedDefects; // 촬영한 사진의 탐지 결과로 업데이트
+        _isDetecting = false; // 탐지 상태를 false로 설정하여 UI 업데이트
       });
       
-      // 성공 메시지 표시
+      // 7. 성공 메시지 표시
       if (mounted) {
+        final saveStatus = savedPath != null ? '저장되었습니다' : '저장에 실패했습니다';
+        final message = '사진이 $saveStatus. ${capturedDefects.length}개의 결함이 탐지되었습니다.';
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('사진이 저장되었습니다. ${_latest.length}개의 결함이 탐지되었습니다.'),
-            backgroundColor: Colors.green,
+            content: Text(message),
+            backgroundColor: savedPath != null ? Colors.green : Colors.orange,
           ),
         );
       }
@@ -216,47 +375,61 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     if (image != null) {
       setState(() {
         _galleryImage = image;
-        _latest = []; // 이전 탐지 결과 초기화
+        _isGalleryMode = true; // 갤러리 모드로 전환
       });
       
       // 선택된 이미지로 탐지 실행
-      final results = await _detector.detectOnImagePath(image.path);
-      print('📱 갤러리 탐지 결과: ${results.length}개 받음');
+      print('🖼️ 갤러리 이미지 탐지 시작: ${image.path}');
+      final results = await _pageController.detectOnImagePath(image.path);
+      print('🖼️ 갤러리 이미지 탐지 완료: ${results.length}개 탐지됨');
+      
       setState(() {
         _latest = results;
       });
-      print('📱 갤러리 UI 상태 업데이트 완료: _latest.length = ${_latest.length}');
+
+      // 갤러리에서 선택한 이미지도 _capturedImages에 추가 (리포트 생성용)
+      if (results.isNotEmpty) {
+        final description = _pageController.buildDefectDescription(results);
+        final capturedImage = CapturedImage(
+          imagePath: image.path,
+          defects: List.from(results),
+          timestamp: DateTime.now(),
+          description: description,
+        );
+        
+        setState(() {
+          _capturedImages.add(capturedImage);
+        });
+      }
     }
   }
 
-  void _clearGalleryImage() {
-    setState(() {
-      _galleryImage = null;
-      _latest = [];
-    });
+  void _clearImage() {
+      setState(() {
+        _galleryImage = null;
+        _capturedImage = null;
+        _latest = []; // 누적된 박스도 클리어
+        _isGalleryMode = false; // 갤러리 모드 해제
+      });
 
-    // 갤러리 이미지 해제 후 카메라가 해제되어 있다면 재초기화
+    // 촬영한 이미지 해제 시 카메라 스트림 상태 확인 및 정리
+    if (_capturedImage != null && _camera != null && _isCameraInitialized) {
+      try {
+        _camera!.stopImageStream();
+        print('📹 촬영한 이미지 해제 시 카메라 스트림 정리');
+      } catch (e) {
+        print('⚠️ 카메라 스트림 정리 오류: $e');
+      }
+    }
+
+    // 이미지 해제 후 카메라가 해제되어 있다면 재초기화
     if (!_isCameraInitialized && _cameras.isNotEmpty) {
       _initializeCamera();
     }
   }
+  
 
-  String _generateDefectDescription(List<DetectedDefect> defects) {
-    if (defects.isEmpty) {
-      return '결함이 탐지되지 않았습니다.';
-    }
-    
-    final counts = <String, int>{};
-    for (final defect in defects) {
-      counts[defect.label] = (counts[defect.label] ?? 0) + 1;
-    }
-    
-    final descriptions = counts.entries.map((entry) {
-      return '${entry.key} ${entry.value}건';
-    }).join(', ');
-    
-    return '총 ${defects.length}건의 결함: $descriptions';
-  }
+  // 결함 설명 생성 로직은 DefectSummaryUtil로 이동
 
   Future<void> _makeReport() async {
     if (_capturedImages.isEmpty) {
@@ -269,77 +442,113 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
       return;
     }
     
-    // 모든 촬영된 사진의 결함들을 수집
+    // 모든 촬영된 사진의 결함들을 수집 (모든 결함 포함)
     final allDefects = <DetectedDefect>[];
     for (final capturedImage in _capturedImages) {
       allDefects.addAll(capturedImage.defects);
     }
     
-    await _report.generateAndShare(defects: allDefects, advisorSummary: _advisorText);
-  }
-
-  Widget _buildDetectionOverlay(DetectedDefect defect) {
-    return Positioned(
-      left: defect.bbox.left,
-      top: defect.bbox.top,
-      child: Container(
-        width: defect.bbox.width,
-        height: defect.bbox.height,
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: _getDefectColor(defect.label),
-            width: 2,
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -20,
-              left: 0,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _getDefectColor(defect.label),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  '${defect.label} (${(defect.confidence * 100).toInt()}%)',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    await _report.generateAndShare(
+      defects: allDefects, 
+      advisorSummary: _advisorText,
+      capturedImages: _capturedImages,
     );
   }
 
+
   Color _getDefectColor(String label) {
-    switch (label) {
-      case 'Dry_joint':
-        return Colors.orange;
-      case 'Short_circuit':
-        return Colors.red;
-      case 'PCB_damage':
-        return Colors.purple;
-      case 'Incorrect_installation':
-        return Colors.blue;
-      default:
-        return Colors.grey;
+    final colorInt = PCBDefectModelConfig.defectColors[label];
+    if (colorInt != null) {
+      return Color(colorInt);
     }
+    return Colors.grey;
   }
+
+  List<Widget> _buildDefectChips() {
+    // 모든 결함 표시 (신뢰도 필터링 제거)
+    if (_latest.isEmpty) return [];
+    
+    // 각 결함 유형별로 번호를 매기기 위한 카운터
+    final Map<String, int> defectCounters = {};
+    final List<Widget> chips = [];
+    
+    for (final defect in _latest) {
+      // 해당 결함 유형의 카운터 증가
+      defectCounters[defect.label] = (defectCounters[defect.label] ?? 0) + 1;
+      final defectNumber = defectCounters[defect.label]!;
+      
+      chips.add(
+        Chip(
+          label: Text(
+            '${defect.label} #$defectNumber (${(defect.confidence * 100).toInt()}%)',
+            style: const TextStyle(fontSize: 13),
+          ),
+          backgroundColor: _getDefectColor(defect.label).withOpacity(0.3),
+          labelStyle: TextStyle(color: _getDefectColor(defect.label)),
+        ),
+      );
+    }
+    
+    return chips;
+  }
+
+  /// 결함 종류별 개수를 표시하는 위젯들 생성
+  List<Widget> _buildDefectSummaryChips() {
+    // 모든 결함 표시 (신뢰도 필터링 제거)
+    if (_latest.isEmpty) return [];
+    
+    // 결함 종류별 개수 계산
+    final Map<String, int> defectCounts = {};
+    for (final defect in _latest) {
+      defectCounts[defect.label] = (defectCounts[defect.label] ?? 0) + 1;
+    }
+    
+    final List<Widget> summaryChips = [];
+    
+    // 각 결함 종류별로 요약 칩 생성
+    defectCounts.forEach((label, count) {
+      summaryChips.add(
+        Chip(
+          label: Text(
+            '$label: $count개',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: _getDefectColor(label).withOpacity(0.2),
+          labelStyle: TextStyle(color: _getDefectColor(label)),
+          side: BorderSide(color: _getDefectColor(label), width: 1),
+        ),
+      );
+    });
+    
+    return summaryChips;
+  }
+
+  // 오버레이 위젯은 widgets/defect_overlays.dart로 이동
 
   @override
   void dispose() {
     try {
       WidgetsBinding.instance.removeObserver(this);
-      _stopDetect();
-      _camera?.dispose();
+      
+      // 탐지 중지
+      _isDetecting = false;
+      _inferenceBusy = false;
+      
+      // 카메라 안전하게 해제
+      if (_camera != null) {
+        try {
+          if (_camera!.value.isInitialized) {
+            _camera!.dispose();
+          }
+        } catch (e) {
+          print('⚠️ 카메라 dispose 오류: $e');
+        }
+        _camera = null;
+      }
+      
+      // 탐지 서비스 해제
       _detector.dispose();
+      
     } catch (e) {
       print('⚠️ dispose 오류: $e');
     }
@@ -355,13 +564,12 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
       case AppLifecycleState.hidden:
       case AppLifecycleState.detached:
         // 페이지가 비가시/중지되면 스트림 중단 및 카메라 해제
-        _disposeCamera();
+        if (_camera != null && _camera!.value.isInitialized) {
+          _disposeCamera();
+        }
         break;
       case AppLifecycleState.resumed:
-        // 갤러리 모드가 아니고 카메라가 해제되어 있으면 재초기화
-        if (mounted && _galleryImage == null && !_isCameraInitialized) {
-          _initializeCamera();
-        }
+        // 자동 재초기화 금지: 사용자가 '탐지 시작'을 눌러야 카메라를 켬
         break;
     }
   }
@@ -369,255 +577,55 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        appBar: AppBar(
-          title: const Text('AI PCB Inspector'),
-          backgroundColor: Colors.green,
-          foregroundColor: Colors.white,
-        ),
       body: SafeArea(
         child: Column(
           children: [
             // 메인 컨텐츠 영역 - 가변 크기 (오버플로우 방지)
             Expanded(
               flex: 6,
-              child: _isCameraInitialized
-                  ? LayoutBuilder(
-                      builder: (context, constraints) {
-                        final double viewW = constraints.maxWidth;
-                        final double viewH = constraints.maxHeight;
-
-                        Widget imageWidget;
-                        int srcW;
-                        int srcH;
-                        if (_galleryImage != null) {
-                          imageWidget = Image.file(File(_galleryImage!.path), fit: BoxFit.contain);
-                          // 갤러리의 원본 크기는 탐지 결과에 저장됨. 없으면 미리보기 비율로 가정
-                          srcW = _latest.isNotEmpty ? _latest.first.sourceWidth : viewW.toInt();
-                          srcH = _latest.isNotEmpty ? _latest.first.sourceHeight : viewH.toInt();
-                        } else {
-                          imageWidget = CameraPreview(_camera!);
-                          // 카메라 프레임 크기: controller의 value.previewSize는 가로세로가 바뀌어 들어오기도 함
-                          final s = _camera!.value.previewSize;
-                          if (s != null) {
-                            srcW = s.width.toInt();
-                            srcH = s.height.toInt();
-                          } else {
-                            srcW = viewW.toInt();
-                            srcH = viewH.toInt();
-                          }
-                        }
-
-                        // letterbox 계산 (BoxFit.contain과 동일한 수학)
-                        final double scale = (viewW / srcW).clamp(0, double.infinity) < (viewH / srcH).clamp(0, double.infinity)
-                            ? viewW / srcW
-                            : viewH / srcH;
-                        final double drawW = srcW * scale;
-                        final double drawH = srcH * scale;
-                        final double offsetX = (viewW - drawW) / 2.0;
-                        final double offsetY = (viewH - drawH) / 2.0;
-
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            FittedBox(
-                              fit: BoxFit.contain,
-                              alignment: Alignment.center,
-                              child: SizedBox(
-                                width: srcW.toDouble(),
-                                height: srcH.toDouble(),
-                                child: imageWidget,
-                              ),
-                            ),
-                            if (_latest.isNotEmpty)
-                              ..._latest.map((defect) {
-                                // 원본 좌표 → 뷰 좌표 변환
-                                final double left = offsetX + defect.bbox.left * scale;
-                                final double top = offsetY + defect.bbox.top * scale;
-                                final double w = defect.bbox.width * scale;
-                                final double h = defect.bbox.height * scale;
-                                return Positioned(
-                                  left: left,
-                                  top: top,
-                                  child: Container(
-                                    width: w,
-                                    height: h,
-                                    decoration: BoxDecoration(
-                                      border: Border.all(
-                                        color: _getDefectColor(defect.label),
-                                        width: 2,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }),
-                          ],
-                        );
-                      },
-                    )
-                  : _buildWelcomeScreen(),
+              child: StreamViewport(
+                camera: _camera,
+                isCameraInitialized: _isCameraInitialized,
+                galleryImage: _galleryImage,
+                capturedImage: _capturedImage,
+                latestDefects: _latest,
+              ),
             ),
             
             // 하단 컨트롤 패널 - 가변 크기 (오버플로우 방지)
             Expanded(
               flex: 4,
               child: Container(
-                color: Colors.grey[100],
-                padding: const EdgeInsets.all(6), // 패딩 더 줄임
-                child: SingleChildScrollView( // 스크롤 가능하게 만들기
+                padding: const EdgeInsets.all(6),
+                child: SingleChildScrollView(
                   child: Column(
-                  children: [
-                  // 카메라 제어 버튼들
-                  if (!_isCameraInitialized) ...[
-                    ElevatedButton.icon(
-                      onPressed: _initializeCamera,
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text('카메라 시작'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    children: [
+                      ControlPanel(
+                        isGalleryMode: _isGalleryMode,
+                        isCameraInitialized: _isCameraInitialized,
+                        isDetecting: _isDetecting,
+                        capturedImagesCount: _capturedImages.length,
+                        hasImage: _galleryImage != null || _capturedImage != null,
+                        onStartDetectOrCapture: _isDetecting ? _captureAndStop : _startDetectAndCamera,
+                        onPickImage: _pickImageFromGallery,
+                        onClearImage: _clearImage,
+                        onAskAi: _askAi,
+                        onMakeReport: _makeReport,
                       ),
-                    ),
-                  ] else ...[
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: _isDetecting ? _stopDetect : _startDetect,
-                          icon: Icon(_isDetecting ? Icons.stop : Icons.play_arrow, size: 16),
-                          label: Text(_isDetecting ? '탐지 중지' : '탐지 시작', style: const TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isDetecting ? Colors.red : Colors.blue,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: _capturePhoto,
-                          icon: const Icon(Icons.camera, size: 16),
-                          label: const Text('사진 촬영', style: TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: _pickImageFromGallery,
-                          icon: const Icon(Icons.photo_library, size: 16),
-                          label: const Text('갤러리', style: TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.indigo,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                        if (_galleryImage != null)
-                          ElevatedButton.icon(
-                            onPressed: _clearGalleryImage,
-                            icon: const Icon(Icons.close, size: 16),
-                            label: const Text('이미지 해제', style: TextStyle(fontSize: 12)),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.grey,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: _askAi,
-                          icon: const Icon(Icons.chat, size: 16),
-                          label: const Text('AI 문의', style: TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: _makeReport,
-                          icon: const Icon(Icons.description, size: 16),
-                          label: Text('리포트 생성${_capturedImages.isNotEmpty ? ' (${_capturedImages.length})' : ''}', style: const TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  
-                  // 탐지 결과 표시
+                  // 탐지 결과 표시 (모든 결함)
                   if (_latest.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.blue[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.blue[200]!),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '탐지된 결함:',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                          ),
-                          const SizedBox(height: 4),
-                          Wrap(
-                            spacing: 8,
-                            children: _latest.map((defect) => Chip(
-                              label: Text(
-                                '${defect.label} (${(defect.confidence * 100).toInt()}%)',
-                                style: const TextStyle(fontSize: 10),
-                              ),
-                              backgroundColor: _getDefectColor(defect.label).withOpacity(0.3),
-                              labelStyle: TextStyle(color: _getDefectColor(defect.label)),
-                            )).toList(),
-                          ),
-                        ],
-                      ),
+                    DefectSummaryPanel(
+                      totalCount: _latest.length,
+                      summaryChips: _buildDefectSummaryChips(),
+                      detailChips: _buildDefectChips(),
                     ),
                   ],
                   
                   // AI 답변 표시
                   if (_advisorText != null) ...[
                     const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.purple[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.purple[200]!),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'AI 어드바이저 답변:',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _advisorText!,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                        ],
-                      ),
-                    ),
+                    AiResponsePanel(text: _advisorText!),
                   ],
                 ],
                   ),
@@ -629,63 +637,4 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
       ),
     );
   }
-
-  Widget _buildWelcomeScreen() {
-    return Center(
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.camera_alt_outlined,
-                size: 100,
-                color: Colors.grey[400],
-              ),
-              const SizedBox(height: 32),
-              const Text(
-                'AI PCB Inspector',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.green,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Container(
-                constraints: const BoxConstraints(maxWidth: 300),
-                child: const Text(
-                  'PCB 불량을 실시간으로 탐지하고\nAI 어드바이저의 도움을 받아\n문제를 해결해보세요',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 18,
-                    color: Colors.grey,
-                    height: 1.6,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 40),
-              Container(
-                constraints: const BoxConstraints(maxWidth: 280),
-                child: const Text(
-                  '위의 "카메라 시작" 버튼을 눌러\n검사를 시작하세요',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.orange,
-                    fontWeight: FontWeight.w500,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
-

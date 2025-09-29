@@ -1,11 +1,11 @@
 {
-    "name": "ai",
-    "short_name": "ai",
+    "name": "AI PCB Inspector",
+    "short_name": "PCB Inspector",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "AI-powered PCB defect detection and analysis tool.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
