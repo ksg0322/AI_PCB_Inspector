@@ -21,10 +21,7 @@ class AiResponsePanel extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
           ),
           const SizedBox(height: 4),
-          Text(
-            text,
-            style: const TextStyle(fontSize: 15),
-          ),
+          Text(text, style: const TextStyle(fontSize: 15)),
         ],
       ),
     );

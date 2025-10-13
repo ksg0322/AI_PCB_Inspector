@@ -73,7 +73,10 @@ class HomePage extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 32,
+                        vertical: 16,
+                      ),
                       textStyle: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,

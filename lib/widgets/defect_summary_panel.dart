@@ -34,11 +34,7 @@ class DefectSummaryPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (summaryChips.isNotEmpty) ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: summaryChips,
-            ),
+            Wrap(spacing: 8, runSpacing: 6, children: summaryChips),
             const SizedBox(height: 10),
           ],
           const Text(
@@ -46,11 +42,7 @@ class DefectSummaryPanel extends StatelessWidget {
             style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
           ),
           const SizedBox(height: 6),
-          Wrap(
-            spacing: 6,
-            runSpacing: 4,
-            children: detailChips,
-          ),
+          Wrap(spacing: 6, runSpacing: 4, children: detailChips),
         ],
       ),
     );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/pcb_defect_models.dart';
+import '../utils/defect_overlay_util.dart';
 
 class DefectOverlays extends StatelessWidget {
   final List<DetectedDefect> defects;
@@ -17,11 +18,7 @@ class DefectOverlays extends StatelessWidget {
     required this.actualImageHeight,
   });
 
-  Color _colorFor(String label) {
-    final colorInt = PCBDefectModelConfig.defectColors[label];
-    if (colorInt != null) return Color(colorInt);
-    return Colors.grey;
-  }
+  Color _colorFor(String label) => DefectOverlayUtil.getFlutterColor(label);
 
   @override
   Widget build(BuildContext context) {
@@ -38,7 +35,7 @@ class DefectOverlays extends StatelessWidget {
       // 모든 모드에서 동일한 좌표 변환 (CameraPreview 기반 탐지로 통일)
       final double baseW = defect.sourceWidth.toDouble();
       final double baseH = defect.sourceHeight.toDouble();
-      
+
       // 탐지 결과 좌표를 그대로 사용 (CameraPreview와 동일한 해상도)
       final double transformedLeft = defect.bbox.left;
       final double transformedTop = defect.bbox.top;
@@ -46,67 +43,54 @@ class DefectOverlays extends StatelessWidget {
       final double transformedHeight = defect.bbox.height;
 
       // 최종 화면 좌표로 변환
-      final double left = offsetX + (transformedLeft / baseW) * actualImageWidth;
+      final double left =
+          offsetX + (transformedLeft / baseW) * actualImageWidth;
       final double top = offsetY + (transformedTop / baseH) * actualImageHeight;
       final double w = (transformedWidth / baseW) * actualImageWidth;
       final double h = (transformedHeight / baseH) * actualImageHeight;
 
-      double numberLeft = left;
-      double numberTop = top;
+      final pos = DefectOverlayUtil.getLabelPosition(
+        defect.label,
+        RectLike(left: left, top: top, width: w, height: h),
+      );
+      final numberLeft = pos.left;
+      final numberTop = pos.top;
 
-      switch (defect.label) {
-        case 'Dry_joint':
-          numberLeft = left - 22;
-          numberTop = top - 3;
-          break;
-        case 'Short_circuit':
-          numberLeft = left + w + 2;
-          numberTop = top - 3;
-          break;
-        case 'PCB_damage':
-          numberLeft = left - 22;
-          numberTop = top + h - 15;
-          break;
-        case 'Incorrect_installation':
-          numberLeft = left + w + 2;
-          numberTop = top + h - 15;
-          break;
-        default:
-          numberLeft = left - 22;
-          numberTop = top - 3;
-      }
-
-      children.add(Positioned(
-        left: left,
-        top: top,
-        child: Container(
-          width: w,
-          height: h,
-          decoration: BoxDecoration(
-            border: Border.all(color: _colorFor(defect.label), width: 2),
-          ),
-        ),
-      ));
-
-      children.add(Positioned(
-        left: numberLeft,
-        top: numberTop,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          decoration: BoxDecoration(
-            color: _colorFor(defect.label),
-            borderRadius: BorderRadius.circular(3),
-          ),
-          child: Text(
-            '$defectNumber',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
+      children.add(
+        Positioned(
+          left: left,
+          top: top,
+          child: Container(
+            width: w,
+            height: h,
+            decoration: BoxDecoration(
+              border: Border.all(color: _colorFor(defect.label), width: 2),
             ),
           ),
         ),
-      ));
+      );
+
+      children.add(
+        Positioned(
+          left: numberLeft,
+          top: numberTop,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            decoration: BoxDecoration(
+              color: _colorFor(defect.label),
+              borderRadius: BorderRadius.circular(3),
+            ),
+            child: Text(
+              '$defectNumber',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     return Stack(children: children);

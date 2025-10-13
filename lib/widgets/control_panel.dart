@@ -39,18 +39,30 @@ class ControlPanel extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.indigo,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
               ),
             ),
           ] else ...[
             ElevatedButton.icon(
               onPressed: onStartDetectOrCapture,
-              icon: Icon(isDetecting ? Icons.camera : Icons.play_arrow, size: 20),
-              label: Text(isDetecting ? '사진 촬영' : '탐지 시작', style: const TextStyle(fontSize: 16)),
+              icon: Icon(
+                isDetecting ? Icons.camera : Icons.play_arrow,
+                size: 20,
+              ),
+              label: Text(
+                isDetecting ? '사진 촬영' : '탐지 시작',
+                style: const TextStyle(fontSize: 16),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: isDetecting ? Colors.orange : Colors.blue,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
               ),
             ),
           ],
@@ -66,7 +78,10 @@ class ControlPanel extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.grey,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                 )
               else
@@ -77,7 +92,10 @@ class ControlPanel extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.indigo,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                 ),
               if (hasImage)
@@ -88,7 +106,10 @@ class ControlPanel extends StatelessWidget {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.grey,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                 ),
             ],
@@ -116,7 +137,7 @@ class ControlPanel extends StatelessWidget {
             ),
           ),
         ],
-        
+
         // AI 문의와 리포트 버튼은 이미지가 있을 때 항상 표시 (카메라 상태와 무관)
         if (hasImage) ...[
           const SizedBox(height: 8),
@@ -130,17 +151,26 @@ class ControlPanel extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.purple,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                 ),
               ),
               ElevatedButton.icon(
                 onPressed: onMakeReport,
                 icon: const Icon(Icons.description, size: 16),
-                label: Text('리포트 생성${capturedImagesCount > 0 ? ' ($capturedImagesCount)' : ''}', style: const TextStyle(fontSize: 12)),
+                label: Text(
+                  '리포트 생성${capturedImagesCount > 0 ? ' ($capturedImagesCount)' : ''}',
+                  style: const TextStyle(fontSize: 12),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                 ),
               ),
             ],

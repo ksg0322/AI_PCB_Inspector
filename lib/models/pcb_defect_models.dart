@@ -8,25 +8,26 @@ class PCBDefectModelConfig {
   static const double nmsThreshold = 0.5;
   static const bool agnosticNms = false;
   static const int maxDetections = 50;
-  static const String modelPath = 'assets/best_float16.tflite'; // YOLOv11n-seg 전이학습 모델
+  static const String modelPath =
+      'assets/best_float16.tflite'; // YOLOv11n-seg 전이학습 모델
   static const bool enableGpu = true; // GPU Delegate 사용 여부
-  
+
   /// 탐지 가능한 결함 클래스 라벨들 (YOLOv11n-seg 전이학습 모델)
   static const List<String> classLabels = [
     'Dry_joint',
-    'Incorrect_installation', 
+    'Incorrect_installation',
     'PCB_damage',
-    'Short_circuit'
+    'Short_circuit',
   ];
-  
+
   /// 결함 클래스별 색상 매핑
   static const Map<String, int> defectColors = {
-    'Dry_joint': 0xFFFF9800,        // Orange
+    'Dry_joint': 0xFFFF9800, // Orange
     'Incorrect_installation': 0xFF2196F3, // Blue
-    'PCB_damage': 0xFF9C27B0,       // Purple
-    'Short_circuit': 0xFFF44336,    // Red
+    'PCB_damage': 0xFF9C27B0, // Purple
+    'Short_circuit': 0xFFF44336, // Red
   };
-  
+
   /// 모델 초기화
   static Future<Interpreter> initializeModel() async {
     final gpuTried = enableGpu && Platform.isAndroid;
@@ -46,7 +47,10 @@ class PCBDefectModelConfig {
         }
       }
 
-      final interpreter = await Interpreter.fromAsset(modelPath, options: options);
+      final interpreter = await Interpreter.fromAsset(
+        modelPath,
+        options: options,
+      );
       print('✅ YOLOv11n-seg PCB 결함 탐지 모델 초기화 완료 (GPU시도=${gpuTried})');
       return interpreter;
     } catch (e) {
@@ -56,7 +60,10 @@ class PCBDefectModelConfig {
         final cpuOptions = InterpreterOptions()
           ..threads = 4
           ..useNnApiForAndroid = false; // XNNPACK 경로 유지
-        final interpreter = await Interpreter.fromAsset(modelPath, options: cpuOptions);
+        final interpreter = await Interpreter.fromAsset(
+          modelPath,
+          options: cpuOptions,
+        );
         print('✅ YOLOv11n-seg CPU 폴백으로 모델 초기화 성공');
         return interpreter;
       } catch (e2) {
@@ -65,7 +72,7 @@ class PCBDefectModelConfig {
       }
     }
   }
-  
+
   /// 모델 검증 및 설정 정보 반환
   static ModelConfig validateAndConfigureModel(Interpreter interpreter) {
     try {
@@ -76,9 +83,9 @@ class PCBDefectModelConfig {
       final outputShape = outputTensor.shape;
 
       // 모델 호환성 검사
-      if (inputShape.length != 4 || 
-          inputShape[1] != inputSize || 
-          inputShape[2] != inputSize || 
+      if (inputShape.length != 4 ||
+          inputShape[1] != inputSize ||
+          inputShape[2] != inputSize ||
           inputShape[3] != 3) {
         print('⚠️ 입력 형식이 예상과 다름: $inputShape');
       }
@@ -94,7 +101,7 @@ class PCBDefectModelConfig {
         numDetections = outputShape[2];
         final features = outputShape[1];
         final remaining = features - 4 - numClasses;
-        
+
         if (remaining == 32) {
           // YOLOv11n-seg: 4(box) + 4(classes) + 32(masks) = 40 (objectness 없음)
           hasObjectness = false;
@@ -111,7 +118,7 @@ class PCBDefectModelConfig {
         numDetections = outputShape[1];
         final features = outputShape[2];
         final remaining = features - 4 - numClasses;
-        
+
         if (remaining == 32) {
           // YOLOv11n-seg: 4(box) + 4(classes) + 32(masks) = 40 (objectness 없음)
           hasObjectness = false;
@@ -136,7 +143,6 @@ class PCBDefectModelConfig {
         inputShape: inputShape,
         outputShape: outputShape,
       );
-
     } catch (e) {
       print('❌ 모델 검증 실패: $e');
       // YOLOv11n-seg 기본값으로 대체
@@ -146,7 +152,11 @@ class PCBDefectModelConfig {
         numDetections: 8400,
         numClasses: classLabels.length,
         inputShape: [1, inputSize, inputSize, 3],
-        outputShape: [1, 41, 8400], // YOLOv11n-seg: 4(box) + 1(obj) + 4(classes) + 32(masks)
+        outputShape: [
+          1,
+          41,
+          8400,
+        ], // YOLOv11n-seg: 4(box) + 1(obj) + 4(classes) + 32(masks)
       );
     }
   }
@@ -173,7 +183,7 @@ class ModelConfig {
   @override
   String toString() {
     return 'ModelConfig(needsTranspose: $needsTranspose, hasObjectness: $hasObjectness, '
-           'numDetections: $numDetections, numClasses: $numClasses)';
+        'numDetections: $numDetections, numClasses: $numClasses)';
   }
 }
 
@@ -257,43 +267,41 @@ class DetectedDefect {
         sourceHeight.hashCode ^
         detectedAt.hashCode;
   }
-  
+
   /// 신뢰도를 퍼센트로 반환
   int get confidencePercent => (confidence * 100).round();
-  
+
   /// 바운딩 박스의 중심점 반환
-  Point<double> get center => Point<double>(
-    bbox.left + bbox.width / 2,
-    bbox.top + bbox.height / 2,
-  );
-  
+  Point<double> get center =>
+      Point<double>(bbox.left + bbox.width / 2, bbox.top + bbox.height / 2);
+
   /// 바운딩 박스의 면적 반환
   double get area => bbox.width * bbox.height;
-  
+
   /// 박스가 아직 유효한지 확인 (만료 시간 체크)
   bool get isValid => DateTime.now().isBefore(detectedAt.add(displayDuration));
-  
+
   /// 남은 표시 시간 (밀리초)
-  int get remainingTimeMs => 
-    detectedAt.add(displayDuration).difference(DateTime.now()).inMilliseconds;
+  int get remainingTimeMs =>
+      detectedAt.add(displayDuration).difference(DateTime.now()).inMilliseconds;
 }
 
 /// 2D 점 클래스
 class Point<T extends num> {
   final T x;
   final T y;
-  
+
   const Point(this.x, this.y);
-  
+
   @override
   String toString() => 'Point($x, $y)';
-  
+
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
     return other is Point<T> && other.x == x && other.y == y;
   }
-  
+
   @override
   int get hashCode => x.hashCode ^ y.hashCode;
 }

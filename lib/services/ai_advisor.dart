@@ -8,17 +8,19 @@ class AiAdvisorService {
   AiAdvisorService({this.modelName = 'gemini-2.5-flash-lite'});
 
   Future<String> askAdvisor({required String defectLabel}) async {
-    final uri = Uri.parse('https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=${ApiKeys.geminiApiKey}');
+    final uri = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=${ApiKeys.geminiApiKey}',
+    );
     final prompt = AiPrompt.getPromptForDefect(defectLabel);
 
     final body = {
       'contents': [
         {
           'parts': [
-            {'text': prompt}
-          ]
-        }
-      ]
+            {'text': prompt},
+          ],
+        },
+      ],
     };
 
     final resp = await http.post(
@@ -40,4 +42,3 @@ class AiAdvisorService {
     return text ?? '응답 없음';
   }
 }
-

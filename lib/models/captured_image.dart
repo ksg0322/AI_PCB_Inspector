@@ -13,5 +13,3 @@ class CapturedImage {
     required this.description,
   });
 }
-
-

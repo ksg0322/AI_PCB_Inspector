@@ -2,7 +2,7 @@ import 'package:camera/camera.dart';
 import '../models/captured_image.dart';
 import '../models/pcb_defect_models.dart';
 import 'camera_controller_helper.dart';
-import 'defect_summary_util.dart';
+import '../utils/defect_summary_util.dart';
 import 'detector_service.dart';
 
 class DetectPageController {
@@ -36,7 +36,10 @@ class DetectPageController {
     return DefectSummaryUtil.generateDescription(defects);
   }
 
-  Future<CapturedImage> buildCaptured(String imagePath, List<DetectedDefect> defects) async {
+  Future<CapturedImage> buildCaptured(
+    String imagePath,
+    List<DetectedDefect> defects,
+  ) async {
     final description = buildDefectDescription(defects);
     return CapturedImage(
       imagePath: imagePath,
@@ -46,5 +49,3 @@ class DetectPageController {
     );
   }
 }
-
-
