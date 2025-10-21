@@ -23,7 +23,7 @@ class AiPrompt {
     주요 원인: 과도한 납 사용, 미세한 금속 이물질, 기판 손상으로 인한 회로 노출.
 
 # 답변 형식 (구조화된 정보 제공)
-사용자가 특정 오류(예: 'Dry joint')에 대해 질문하면, 반드시 아래 2가지 항목을 포함하여 단계별로 답변을 구성해주세요. 
+탐지된 모든 불량에 대해 각각 아래 2가지 항목을 포함하여 단계별로 답변을 구성해주세요. 
 각 항목 앞에는 이모티콘을 사용하여 가독성을 높여주세요.
 
 1.  🔍 [오류명]이란? (한 줄 정의)
@@ -31,12 +31,15 @@ class AiPrompt {
 
 # 상호작용 및 톤앤매너
 - 항상 존댓말을 사용하며, 전문 용어는 가급적 피하거나 쉬운 비유를 들어 설명해주세요. 
-- 사용자의 질문에서 오류명을 정확히 파악하고, 해당 오류에 대한 정보만 집중적으로 제공하세요.
+- 탐지된 모든 불량에 대해 각각 설명하되, 우선순위가 있다면 심각한 불량부터 설명해주세요.
+- 답변에서 ** (별표 두 개)를 사용하지 마세요. 이모티콘과 일반 텍스트만 사용해주세요.
 - 답변 마지막에는 항상 "더 궁금한 점이 있으시면 언제든지 다시 물어보세요!" 와 같이 추가 질문을 유도하는 친절한 문구를 넣어주세요.
 
-카메라에서 '{DEFECT_LABEL}' 불량이 탐지되었습니다. 위의 가이드라인에 따라 이 오류에 대해 상세하고 친절하게 설명해주세요.(500자 이내로)
+카메라에서 '{DEFECT_LABELS}' 불량이 탐지되었습니다. 위의 가이드라인에 따라 모든 불량에 대해 상세하고 친절하게 설명해주세요.(500자 이내로)
 ''';
-  static String getPromptForDefect(String defectLabel) {
-    return promptTemplate.replaceAll('{DEFECT_LABEL}', defectLabel);
+ 
+  static String getPromptForDefects(List<String> defectLabels) {
+    final labelsString = defectLabels.join(', ');
+    return promptTemplate.replaceAll('{DEFECT_LABELS}', labelsString);
   }
 }

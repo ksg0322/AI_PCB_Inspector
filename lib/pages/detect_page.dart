@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:flutter/foundation.dart';
 import '../services/detector_service.dart';
 import '../models/pcb_defect_models.dart';
@@ -12,9 +11,9 @@ import '../models/captured_image.dart';
 import '../services/detect_page_controller.dart';
 import '../services/photo_saver.dart';
 import '../widgets/stream_viewport.dart';
-import '../widgets/control_panel.dart';
 import '../widgets/defect_summary_panel.dart';
 import '../widgets/ai_response_panel.dart';
+import '../widgets/thumbnail_strip.dart';
 
 class DetectPage extends StatefulWidget {
   const DetectPage({super.key});
@@ -28,6 +27,8 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   late final DetectPageController _pageController;
   final AiAdvisorService _advisor = AiAdvisorService();
   final ReportGenerator _report = ReportGenerator();
+  final GlobalKey<ThumbnailStripState> _thumbnailStripKey =
+      GlobalKey<ThumbnailStripState>();
 
   CameraController? _camera;
   List<CameraDescription> _cameras = const [];
@@ -37,16 +38,15 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   List<DetectedDefect> _latest = const [];
   String? _advisorText;
   bool _isInitializingCamera = false;
-  bool _isGalleryMode = false; // 갤러리 모드 여부
 
-  // 프레임 처리량 제한을 위한 변수들
   bool _inferenceBusy = false;
   int _lastInferMs = 0;
-  static const int _minIntervalMs = 80; // ≈12.5 FPS
+  static const int _minIntervalMs = 80;
 
   XFile? _galleryImage;
-  XFile? _capturedImage; // 촬영한 이미지 저장
+  XFile? _capturedImage;
   List<CapturedImage> _capturedImages = [];
+  List<XFile> _recentImages = [];
 
   @override
   void initState() {
@@ -143,59 +143,46 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
 
   Future<void> _startDetectAndCamera() async {
     if (_isDetecting) return;
-    // 갤러리/촬영 이미지 해제 후 카메라 미리보기로 전환
+    
     setState(() {
       _galleryImage = null;
       _capturedImage = null;
-      _isGalleryMode = false;
       _latest = [];
     });
-    // 카메라가 초기화되지 않았다면 먼저 초기화
+    
     if (!_isCameraInitialized) {
       await _initializeCamera();
       if (!_isCameraInitialized) return;
     }
-    // 탐지 시작
+    
     await _startDetect();
   }
 
   Future<void> _captureAndStop() async {
     if (!_isDetecting) return;
-
-    // 사진 촬영 후 탐지 중지 (카메라는 유지)
     await _capturePhoto();
     await _stopDetect();
-    // 카메라는 유지하여 촬영한 이미지를 계속 표시
   }
 
   Future<void> _startDetect() async {
     if (_camera == null || !_isCameraInitialized || _isDetecting) return;
 
     setState(() => _isDetecting = true);
-    _inferenceBusy = false; // 추론 상태 초기화
-    _lastInferMs = 0; // 마지막 추론 시간 초기화
-
-    // CameraPreview에서 주기적으로 이미지 캡처하여 탐지
+    _inferenceBusy = false;
+    _lastInferMs = 0;
     _startPreviewDetection();
   }
 
   void _startPreviewDetection() {
     if (!_isDetecting) return;
 
-    // 200ms마다 CameraPreview에서 이미지 캡처하여 탐지
     Future.delayed(const Duration(milliseconds: 200), () async {
       if (!_isDetecting || _camera == null || !_isCameraInitialized) return;
+      if (!_camera!.value.isInitialized) return;
 
-      // 카메라 컨트롤러 상태 확인
-      if (!_camera!.value.isInitialized) {
-        // silent
-        return;
-      }
-
-      // 처리량 제한: 추론 중이거나 최소 간격 미달 시 스킵
       final now = DateTime.now().millisecondsSinceEpoch;
       if (_inferenceBusy || now - _lastInferMs < _minIntervalMs) {
-        _startPreviewDetection(); // 다음 주기로 계속
+        _startPreviewDetection();
         return;
       }
 
@@ -203,27 +190,20 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
       _lastInferMs = now;
 
       try {
-        // CameraPreview에서 이미지 캡처 (임시 파일)
         final image = await _camera!.takePicture();
-
-        // 캡처한 이미지로 탐지 수행 (CameraPreview와 동일한 해상도)
         final results = await _pageController.detectOnImagePath(image.path);
 
         if (mounted && _isDetecting) {
-          setState(() {
-            _latest = results;
-          });
+          setState(() => _latest = results);
         }
 
-        // 임시 파일 삭제
         try {
           await File(image.path).delete();
         } catch (e) {
-          // silent
+          // Ignore file deletion errors
         }
       } catch (e) {
         debugLog('탐지 오류: $e');
-        // 카메라 오류 시 탐지 중지
         if (e.toString().contains('Disposed CameraController') ||
             e.toString().contains('CameraException')) {
           debugLog('❌ 카메라 오류로 인한 탐지 중지');
@@ -231,9 +211,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
         }
       } finally {
         _inferenceBusy = false;
-        if (_isDetecting) {
-          _startPreviewDetection(); // 다음 주기로 계속
-        }
+        if (_isDetecting) _startPreviewDetection();
       }
     });
   }
@@ -242,9 +220,8 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     if (!_isDetecting) return;
 
     setState(() => _isDetecting = false);
-    _inferenceBusy = false; // 추론 상태 초기화
+    _inferenceBusy = false;
 
-    // 카메라가 유효한 경우에만 스트림 중지
     if (_camera != null && _isCameraInitialized) {
       try {
         if (_camera!.value.isStreamingImages) {
@@ -259,11 +236,22 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   Future<void> _askAi() async {
     try {
       final validDefects = _latest;
-      final label = validDefects.isNotEmpty
-          ? validDefects.first.label
-          : 'Short_circuit';
+      if (validDefects.isEmpty) {
+        setState(() => _advisorText = '탐지된 불량이 없습니다.');
+        return;
+      }
 
-      final text = await _advisor.askAdvisor(defectLabel: label);
+      // 탐지된 모든 불량의 라벨을 수집
+      final defectLabels = validDefects.map((defect) => defect.label).toSet().toList();
+      
+      String text;
+      if (defectLabels.length == 1) {
+        // 단일 불량인 경우 기존 방식 사용
+        text = await _advisor.askAdvisor(defectLabel: defectLabels.first);
+      } else {
+        // 여러 불량인 경우 새로운 방식 사용
+        text = await _advisor.askAdvisorForMultipleDefects(defectLabels: defectLabels);
+      }
 
       setState(() => _advisorText = text);
     } catch (e) {
@@ -275,7 +263,6 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   Future<void> _capturePhoto() async {
     if (_camera == null || !_isCameraInitialized) return;
 
-    // 갤러리 이미지가 있으면 카메라 촬영을 막음
     if (_galleryImage != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -287,51 +274,31 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     }
 
     try {
-      // 1. 사진 촬영
       final image = await _camera!.takePicture();
-      // silent
 
-      // 2. 실시간 탐지 및 카메라 리소스 완전 해제
-      if (_isDetecting) {
-        await _stopDetect();
-        // silent
-      }
-      // 프리뷰/이미지리더까지 포함한 카메라 리소스를 모두 해제하여 버퍼 릴리즈
-      if (_isCameraInitialized) {
-        await _disposeCamera();
-      }
+      if (_isDetecting) await _stopDetect();
+      if (_isCameraInitialized) await _disposeCamera();
 
-      // 3. 촬영한 사진을 별도로 탐지 (시스템 안정화를 위한 지연)
-      // silent
       await Future.delayed(const Duration(milliseconds: 300));
-      final capturedDefects = await _pageController.detectOnImagePath(
-        image.path,
-      );
-
-      // 4. 촬영한 이미지의 탐지 결과는 원본 좌표 그대로 사용 (실시간만 회전 적용)
-      final transformedDefects = capturedDefects;
-
-      // 5. 촬영한 사진을 저장소에 저장
+      final capturedDefects = await _pageController.detectOnImagePath(image.path);
       final savedPath = await PhotoSaver.savePhotoToGallery(image);
-
-      // 6. 촬영한 사진과 탐지 결과를 저장
-      final capturedImage = await _pageController.buildCaptured(
-        image.path,
-        transformedDefects,
-      );
+      final capturedImage = await _pageController.buildCaptured(image.path, capturedDefects);
 
       setState(() {
         _capturedImages.add(capturedImage);
-        _capturedImage = image; // 촬영한 이미지 저장하여 계속 표시
-        _latest = capturedDefects; // 촬영한 사진의 탐지 결과로 업데이트
-        _isDetecting = false; // 탐지 상태를 false로 설정하여 UI 업데이트
+        _capturedImage = image;
+        _latest = capturedDefects;
+        _isDetecting = false;
+
+        _recentImages.insert(0, image);
+        if (_recentImages.length > 5) {
+          _recentImages.removeLast();
+        }
       });
 
-      // 7. 성공 메시지 표시
       if (mounted) {
         final saveStatus = savedPath != null ? '저장되었습니다' : '저장에 실패했습니다';
-        final message =
-            '사진이 $saveStatus. ${capturedDefects.length}개의 결함이 탐지되었습니다.';
+        final message = '사진이 $saveStatus. ${capturedDefects.length}개의 결함이 탐지되었습니다.';
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -353,110 +320,138 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _pickImageFromGallery() async {
-    // 실시간 탐지 중지
-    if (_isDetecting) {
-      await _stopDetect();
-    }
+  Future<void> _handleImageSelected(XFile image) async {
+    if (_isDetecting) await _stopDetect();
+    if (_isCameraInitialized) await _disposeCamera();
 
-    // 갤러리로 전환 시 카메라 완전 해제 (Camerax orientation listener 잔존 방지)
-    if (_isCameraInitialized) {
-      await _disposeCamera();
-    }
-
-    final picker = ImagePicker();
-    final image = await picker.pickImage(source: ImageSource.gallery);
-
-    if (image != null) {
-      setState(() {
-        _galleryImage = image;
-        _isGalleryMode = true; // 갤러리 모드로 전환
-      });
-
-      // 선택된 이미지로 탐지 실행
-      final results = await _pageController.detectOnImagePath(image.path);
-
-      setState(() {
-        _latest = results;
-      });
-
-      // 갤러리에서 선택한 이미지도 _capturedImages에 추가 (리포트 생성용)
-      if (results.isNotEmpty) {
-        final description = _pageController.buildDefectDescription(results);
-        final capturedImage = CapturedImage(
-          imagePath: image.path,
-          defects: List.from(results),
-          timestamp: DateTime.now(),
-          description: description,
-        );
-
-        setState(() {
-          _capturedImages.add(capturedImage);
-        });
-      }
-    }
-  }
-
-  void _clearImage() {
     setState(() {
-      _galleryImage = null;
-      _capturedImage = null;
-      _latest = []; // 누적된 박스도 클리어
-      _isGalleryMode = false; // 갤러리 모드 해제
+      _galleryImage = image;
+      _capturedImage = image;
     });
 
-    // 촬영한 이미지 해제 시 카메라 스트림 상태 확인 및 정리
-    if (_capturedImage != null && _camera != null && _isCameraInitialized) {
-      try {
-        _camera!.stopImageStream();
-      } catch (e) {
-        debugLog('⚠️ 카메라 스트림 정리 오류: $e');
-      }
-    }
+    final results = await _pageController.detectOnImagePath(image.path);
 
-    // 이미지 해제 후 카메라가 해제되어 있다면 재초기화
-    if (!_isCameraInitialized && _cameras.isNotEmpty) {
-      _initializeCamera();
+    setState(() {
+      _latest = results;
+
+      if (!_recentImages.any((img) => img.path == image.path)) {
+        _recentImages.insert(0, image);
+        if (_recentImages.length > 5) {
+          _recentImages.removeLast();
+        }
+      }
+    });
+
+    if (results.isNotEmpty) {
+      final description = _pageController.buildDefectDescription(results);
+      final capturedImage = CapturedImage(
+        imagePath: image.path,
+        defects: List.from(results),
+        timestamp: DateTime.now(),
+        description: description,
+      );
+
+      setState(() {
+        _capturedImages.add(capturedImage);
+      });
     }
   }
 
-  Future<void> _makeReport() async {
-    if (_capturedImages.isEmpty) {
+  Future<void> _handleImageDeleted(XFile image) async {
+    setState(() {
+      _recentImages.removeWhere((img) => img.path == image.path);
+      _capturedImages.removeWhere((captured) => captured.imagePath == image.path);
+      
+      if (_galleryImage?.path == image.path || _capturedImage?.path == image.path) {
+        _galleryImage = null;
+        _capturedImage = null;
+        _latest = [];
+      }
+    });
+
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('리포트를 생성하려면 먼저 사진을 촬영해주세요.'),
+          content: Text('썸네일 이미지가 삭제되었습니다.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
+  Future<void> _makeReportFromSelectedThumbnails(
+    Set<String> selectedPaths,
+  ) async {
+    if (selectedPaths.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('리포트를 생성하려면 먼저 이미지를 선택해주세요. (길게 눌러서 선택)'),
           backgroundColor: Colors.orange,
         ),
       );
       return;
     }
 
-    // 모든 촬영된 사진의 결함들을 수집 (모든 결함 포함)
-    final allDefects = <DetectedDefect>[];
-    for (final capturedImage in _capturedImages) {
-      allDefects.addAll(capturedImage.defects);
+    // 선택된 이미지들의 탐지 결과 찾기
+    final selectedCapturedImages = _capturedImages
+        .where((captured) => selectedPaths.contains(captured.imagePath))
+        .toList();
+
+    if (selectedCapturedImages.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('선택된 이미지의 탐지 결과를 찾을 수 없습니다.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
     }
 
+    // 선택된 이미지들의 결함들을 수집
+    final selectedDefects = <DetectedDefect>[];
+    for (final capturedImage in selectedCapturedImages) {
+      selectedDefects.addAll(capturedImage.defects);
+    }
+
+    // 리포트 생성
     await _report.generateAndShare(
-      defects: allDefects,
+      defects: selectedDefects,
       advisorSummary: _advisorText,
-      capturedImages: _capturedImages,
+      capturedImages: selectedCapturedImages,
     );
+
+    // 리포트 생성 후 선택 해제
+    _thumbnailStripKey.currentState?.clearSelection();
+  }
+
+  Future<void> _makeReportFromSelectedOrAll() async {
+    // 썸네일에서 선택된 이미지가 있는지 확인
+    final selectedPaths = _thumbnailStripKey.currentState?.selectedImagePaths;
+
+    if (selectedPaths != null && selectedPaths.isNotEmpty) {
+      // 선택된 이미지가 있으면 선택된 것만 리포트 생성
+      await _makeReportFromSelectedThumbnails(selectedPaths);
+    } else {
+      // 선택된 이미지가 없으면 이미지 선택 알림 표시
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('리포트를 생성하려면 먼저 이미지를 선택해주세요. (길게 눌러서 선택)'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
   }
 
   Color _getDefectColor(String label) =>
       DefectOverlayUtil.getFlutterColor(label);
 
   List<Widget> _buildDefectChips() {
-    // 모든 결함 표시 (신뢰도 필터링 제거)
     if (_latest.isEmpty) return [];
 
-    // 각 결함 유형별로 번호를 매기기 위한 카운터
     final Map<String, int> defectCounters = {};
     final List<Widget> chips = [];
 
     for (final defect in _latest) {
-      // 해당 결함 유형의 카운터 증가
       defectCounters[defect.label] = (defectCounters[defect.label] ?? 0) + 1;
       final defectNumber = defectCounters[defect.label]!;
 
@@ -475,20 +470,15 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     return chips;
   }
 
-  /// 결함 종류별 개수를 표시하는 위젯들 생성
   List<Widget> _buildDefectSummaryChips() {
-    // 모든 결함 표시 (신뢰도 필터링 제거)
     if (_latest.isEmpty) return [];
 
-    // 결함 종류별 개수 계산
     final Map<String, int> defectCounts = {};
     for (final defect in _latest) {
       defectCounts[defect.label] = (defectCounts[defect.label] ?? 0) + 1;
     }
 
     final List<Widget> summaryChips = [];
-
-    // 각 결함 종류별로 요약 칩 생성
     defectCounts.forEach((label, count) {
       summaryChips.add(
         Chip(
@@ -556,62 +546,69 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final safeHeight = MediaQuery.of(context).padding.top + MediaQuery.of(context).padding.bottom;
+    final maxImageHeight = (screenHeight - safeHeight) * 0.4;
+
     return Scaffold(
       body: SafeArea(
         child: Column(
           children: [
-            // 메인 컨텐츠 영역 - 가변 크기 (오버플로우 방지)
-            Expanded(
-              flex: 6,
-              child: StreamViewport(
-                camera: _camera,
-                isCameraInitialized: _isCameraInitialized,
-                galleryImage: _galleryImage,
-                capturedImage: _capturedImage,
-                latestDefects: _latest,
+            StreamViewport(
+              camera: _camera,
+              isCameraInitialized: _isCameraInitialized,
+              galleryImage: _galleryImage,
+              capturedImage: _capturedImage,
+              latestDefects: _latest,
+              maxHeight: maxImageHeight,
+            ),
+            ThumbnailStrip(
+              key: _thumbnailStripKey,
+              recentImages: _recentImages,
+              onImageSelected: _handleImageSelected,
+              onGenerateReport: _makeReportFromSelectedThumbnails,
+              onImageDeleted: _handleImageDeleted,
+            ),
+            Container(
+              padding: const EdgeInsets.all(8.0),
+              child: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.8,
+                child: ElevatedButton.icon(
+                  onPressed: _isDetecting ? _captureAndStop : _startDetectAndCamera,
+                  icon: Icon(_isDetecting ? Icons.camera : Icons.play_arrow, size: 20),
+                  label: Text(
+                    _isDetecting ? '사진 촬영' : '탐지',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isDetecting ? Colors.orange : Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
               ),
             ),
-
-            // 하단 컨트롤 패널 - 가변 크기 (오버플로우 방지)
             Expanded(
-              flex: 4,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      ControlPanel(
-                        isGalleryMode: _isGalleryMode,
-                        isCameraInitialized: _isCameraInitialized,
-                        isDetecting: _isDetecting,
-                        capturedImagesCount: _capturedImages.length,
-                        hasImage:
-                            _galleryImage != null || _capturedImage != null,
-                        onStartDetectOrCapture: _isDetecting
-                            ? _captureAndStop
-                            : _startDetectAndCamera,
-                        onPickImage: _pickImageFromGallery,
-                        onClearImage: _clearImage,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_latest.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      DefectSummaryPanel(
+                        totalCount: _latest.length,
+                        summaryChips: _buildDefectSummaryChips(),
+                        detailChips: _buildDefectChips(),
+                        onGenerateReport: _makeReportFromSelectedOrAll,
                         onAskAi: _askAi,
-                        onMakeReport: _makeReport,
                       ),
-                      // 탐지 결과 표시 (모든 결함)
-                      if (_latest.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        DefectSummaryPanel(
-                          totalCount: _latest.length,
-                          summaryChips: _buildDefectSummaryChips(),
-                          detailChips: _buildDefectChips(),
-                        ),
-                      ],
-
-                      // AI 답변 표시
-                      if (_advisorText != null) ...[
-                        const SizedBox(height: 8),
-                        AiResponsePanel(text: _advisorText!),
-                      ],
                     ],
-                  ),
+                    if (_advisorText != null) ...[
+                      const SizedBox(height: 8),
+                      AiResponsePanel(text: _advisorText!),
+                    ],
+                  ],
                 ),
               ),
             ),

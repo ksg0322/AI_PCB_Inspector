@@ -10,6 +10,7 @@ class StreamViewport extends StatelessWidget {
   final XFile? galleryImage;
   final XFile? capturedImage;
   final List<DetectedDefect> latestDefects;
+  final double? maxHeight;
 
   const StreamViewport({
     super.key,
@@ -18,6 +19,7 @@ class StreamViewport extends StatelessWidget {
     required this.galleryImage,
     required this.capturedImage,
     required this.latestDefects,
+    this.maxHeight,
   });
 
   @override
@@ -25,7 +27,12 @@ class StreamViewport extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double viewW = constraints.maxWidth;
-        final double viewH = constraints.maxHeight;
+        
+        // maxHeight가 제공되면 사용, 아니면 안전한 폴백 값 사용
+        final double viewH = maxHeight ?? 
+                            (constraints.maxHeight.isFinite 
+                              ? constraints.maxHeight 
+                              : MediaQuery.of(context).size.height * 0.6);
 
         Widget imageWidget;
         int srcW;
@@ -40,7 +47,7 @@ class StreamViewport extends StatelessWidget {
               : viewW.toInt();
           srcH = latestDefects.isNotEmpty
               ? latestDefects.first.sourceHeight
-              : viewH.toInt();
+              : viewW.toInt(); // viewH 대신 viewW 사용 (안전)
         } else if (capturedImage != null) {
           imageWidget = Image.file(
             File(capturedImage!.path),
@@ -51,7 +58,7 @@ class StreamViewport extends StatelessWidget {
               : viewW.toInt();
           srcH = latestDefects.isNotEmpty
               ? latestDefects.first.sourceHeight
-              : viewH.toInt();
+              : viewW.toInt(); // viewH 대신 viewW 사용 (안전)
         } else if (isCameraInitialized && camera != null) {
           imageWidget = CameraPreview(camera!);
 
@@ -72,7 +79,7 @@ class StreamViewport extends StatelessWidget {
                   : s.width.toInt();
             } else {
               srcW = viewW.toInt();
-              srcH = viewH.toInt();
+              srcH = viewW.toInt(); // viewH 대신 viewW 사용 (안전)
             }
           }
         } else {
@@ -83,7 +90,7 @@ class StreamViewport extends StatelessWidget {
             ),
           );
           srcW = viewW.toInt();
-          srcH = viewH.toInt();
+          srcH = viewW.toInt(); // viewH 대신 viewW 사용 (안전)
         }
 
         final double imageAspectRatio = srcW / srcH;
@@ -92,6 +99,51 @@ class StreamViewport extends StatelessWidget {
         double actualImageWidth, actualImageHeight;
         double offsetX, offsetY;
 
+        // 갤러리 이미지나 촬영된 이미지일 때 - 여백 완전 제거
+        if (galleryImage != null || capturedImage != null) {
+          // 가로 기준으로 이미지 크기 계산
+          actualImageWidth = viewW;
+          actualImageHeight = viewW / imageAspectRatio;
+          
+          // maxHeight 제한 적용 (오버플로우 방지)
+          if (actualImageHeight > viewH) {
+            actualImageHeight = viewH;
+            actualImageWidth = viewH * imageAspectRatio;
+          }
+          
+          offsetX = 0;
+          offsetY = 0;
+          
+          // 정확한 크기의 SizedBox 반환 → 여백 없음
+          return SizedBox(
+            width: actualImageWidth,
+            height: actualImageHeight,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                FittedBox(
+                  fit: BoxFit.fill,
+                  alignment: Alignment.center,
+                  child: SizedBox(
+                    width: srcW.toDouble(),
+                    height: srcH.toDouble(),
+                    child: imageWidget,
+                  ),
+                ),
+                if (latestDefects.isNotEmpty)
+                  DefectOverlays(
+                    defects: latestDefects,
+                    offsetX: 0,
+                    offsetY: 0,
+                    actualImageWidth: actualImageWidth,
+                    actualImageHeight: actualImageHeight,
+                  ),
+              ],
+            ),
+          );
+        }
+
+        // 카메라 프리뷰 모드 - 고정 높이 영역 사용
         if (imageAspectRatio > viewAspectRatio) {
           actualImageWidth = viewW;
           actualImageHeight = viewW / imageAspectRatio;
@@ -103,28 +155,31 @@ class StreamViewport extends StatelessWidget {
           offsetX = (viewW - actualImageWidth) / 2;
           offsetY = 0;
         }
-
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            FittedBox(
-              fit: BoxFit.contain,
-              alignment: Alignment.center,
-              child: SizedBox(
-                width: srcW.toDouble(),
-                height: srcH.toDouble(),
-                child: imageWidget,
+        
+        return SizedBox(
+          height: viewH, // 카메라 모드는 고정 높이
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              FittedBox(
+                fit: BoxFit.contain,
+                alignment: Alignment.center,
+                child: SizedBox(
+                  width: srcW.toDouble(),
+                  height: srcH.toDouble(),
+                  child: imageWidget,
+                ),
               ),
-            ),
-            if (latestDefects.isNotEmpty)
-              DefectOverlays(
-                defects: latestDefects,
-                offsetX: offsetX,
-                offsetY: offsetY,
-                actualImageWidth: actualImageWidth,
-                actualImageHeight: actualImageHeight,
-              ),
-          ],
+              if (latestDefects.isNotEmpty)
+                DefectOverlays(
+                  defects: latestDefects,
+                  offsetX: offsetX,
+                  offsetY: offsetY,
+                  actualImageWidth: actualImageWidth,
+                  actualImageHeight: actualImageHeight,
+                ),
+            ],
+          ),
         );
       },
     );
