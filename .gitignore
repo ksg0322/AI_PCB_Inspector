@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Cursor IDE related
+.cursor/
+
+# Configuration files
+lib/config/api_keys.dart

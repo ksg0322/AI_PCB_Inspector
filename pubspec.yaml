@@ -34,5 +34,5 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/best_float16.tflite
+    - assets/YOLO11n-seg-custom.tflite
     - assets/fonts/NotoSansKR-Regular.ttf

@@ -41,7 +41,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
 
   bool _inferenceBusy = false;
   int _lastInferMs = 0;
-  static const int _minIntervalMs = 80;
+  static const int _minIntervalMs = 150; // CPU 멀티스레드 최적화 (약 6-7 FPS)
 
   XFile? _galleryImage;
   XFile? _capturedImage;
@@ -176,7 +176,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   void _startPreviewDetection() {
     if (!_isDetecting) return;
 
-    Future.delayed(const Duration(milliseconds: 200), () async {
+    Future.delayed(const Duration(milliseconds: 100), () async {
       if (!_isDetecting || _camera == null || !_isCameraInitialized) return;
       if (!_camera!.value.isInitialized) return;
 
@@ -548,7 +548,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
     final safeHeight = MediaQuery.of(context).padding.top + MediaQuery.of(context).padding.bottom;
-    final maxImageHeight = (screenHeight - safeHeight) * 0.4;
+    final maxImageHeight = (screenHeight - safeHeight) * 0.5;
 
     return Scaffold(
       body: SafeArea(

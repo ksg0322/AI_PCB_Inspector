@@ -16,9 +16,7 @@ class ReportGenerator {
     final doc = pw.Document();
 
     // 한글 지원 폰트 로드
-    // silent
     final koreanFont = await _loadKoreanFont();
-    // silent
 
     // 한글 지원 폰트 스타일 정의
     final arialBold = pw.TextStyle(
@@ -108,7 +106,6 @@ class ReportGenerator {
       final annotatedImagePath =
           '${tempDir.path}/annotated_image_$imageNumber.jpg';
 
-      // silent
       final annotatedPath = await ImageAnnotator.createAnnotatedImage(
         originalImagePath: capturedImage.imagePath,
         defects: capturedImage.defects,
@@ -206,14 +203,11 @@ class ReportGenerator {
   /// 한글 지원 폰트 로드
   Future<pw.Font> _loadKoreanFont() async {
     try {
-      // 먼저 assets에서 한글 폰트 시도
       final fontData = await rootBundle.load(
         'assets/fonts/NotoSansKR-Regular.ttf',
       );
       return pw.Font.ttf(fontData);
     } catch (e) {
-      // silent
-      // 폰트 로드 실패 시 기본 폰트 사용
       return pw.Font.helvetica();
     }
   }

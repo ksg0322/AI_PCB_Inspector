@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 /// PCB 결함 탐지 모델 설정 및 초기화 (YOLOv11n-seg 전이학습 모델)
@@ -9,8 +8,8 @@ class PCBDefectModelConfig {
   static const bool agnosticNms = false;
   static const int maxDetections = 50;
   static const String modelPath =
-      'assets/best_float16.tflite'; // YOLOv11n-seg 전이학습 모델
-  static const bool enableGpu = true; // GPU Delegate 사용 여부
+      'assets/YOLO11n-seg-custom.tflite'; // YOLOv11n-seg 전이학습 모델
+  static const int cpuThreads = 4; // CPU 스레드 수
 
   /// 탐지 가능한 결함 클래스 라벨들 (YOLOv11n-seg 전이학습 모델)
   static const List<String> classLabels = [
@@ -28,46 +27,37 @@ class PCBDefectModelConfig {
     'Short_circuit': 0xFFF44336, // Red
   };
 
-  /// 모델 초기화
+  /// 모델 초기화 (CPU 멀티스레드 최적화)
   static Future<Interpreter> initializeModel() async {
-    final gpuTried = enableGpu && Platform.isAndroid;
-    // 1) 1차: GPU 시도 (Android)
     try {
       final options = InterpreterOptions()
-        ..threads = 4
-        ..useNnApiForAndroid = false; // GPU와 동시 사용 금지
-
-      if (gpuTried) {
-        try {
-          final gpu = GpuDelegateV2();
-          options.addDelegate(gpu);
-          print('✅ Android GPU Delegate 활성화');
-        } catch (e) {
-          print('⚠️ GPU Delegate 추가 실패, CPU로 폴백 예정: $e');
-        }
-      }
+        ..threads = cpuThreads // 멀티스레드 활성화
+        ..useNnApiForAndroid = true; // NNAPI로 하드웨어 가속
 
       final interpreter = await Interpreter.fromAsset(
         modelPath,
         options: options,
       );
-      print('✅ YOLOv11n-seg PCB 결함 탐지 모델 초기화 완료 (GPU시도=${gpuTried})');
+      
+      print('✅ YOLOv11n-seg CPU 멀티스레드($cpuThreads threads) 초기화 완료');
       return interpreter;
     } catch (e) {
-      print('⚠️ 1차 초기화 실패 (GPU 시도 포함 가능): $e');
-      // 2) 2차: CPU 폴백 (XNNPACK)
+      print('❌ 모델 로딩 실패: $e');
+      
+      // NNAPI 실패 시 순수 CPU로 재시도
       try {
-        final cpuOptions = InterpreterOptions()
-          ..threads = 4
-          ..useNnApiForAndroid = false; // XNNPACK 경로 유지
+        final fallbackOptions = InterpreterOptions()
+          ..threads = cpuThreads
+          ..useNnApiForAndroid = false; // XNNPACK 사용
+          
         final interpreter = await Interpreter.fromAsset(
           modelPath,
-          options: cpuOptions,
+          options: fallbackOptions,
         );
-        print('✅ YOLOv11n-seg CPU 폴백으로 모델 초기화 성공');
+        print('✅ CPU 폴백 모드($cpuThreads threads, XNNPACK) 초기화 성공');
         return interpreter;
       } catch (e2) {
-        print('❌ 모델 로딩 실패(폴백 포함): $e2');
+        print('❌ 최종 모델 로딩 실패: $e2');
         rethrow;
       }
     }
