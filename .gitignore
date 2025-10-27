@@ -49,3 +49,4 @@ app.*.map.json
 
 # Configuration files
 lib/config/api_keys.dart
+.cursor/rules/rule.mdc
