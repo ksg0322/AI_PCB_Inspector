@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:ai_pcb_inspector/pages/detect_page.dart';
+import 'package:ai_pcb_inspector/pages/detect_tabs_page.dart';
 
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
@@ -15,7 +15,10 @@ class HomePage extends StatelessWidget {
               child: Center(
                 child: SingleChildScrollView(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 24,
+                    ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -74,9 +77,9 @@ class HomePage extends StatelessWidget {
                 width: MediaQuery.of(context).size.width * 0.8,
                 child: ElevatedButton.icon(
                   onPressed: () {
-                    Navigator.of(context).push(
+                    Navigator.of(context).pushReplacement(
                       MaterialPageRoute(
-                        builder: (context) => const DetectPage(),
+                        builder: (context) => const DetectTabsPage(),
                       ),
                     );
                   },

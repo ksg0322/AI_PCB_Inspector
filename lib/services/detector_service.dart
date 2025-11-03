@@ -24,9 +24,7 @@ class DetectorService {
   int _lastProcessedFrame = 0;
   static const int _frameSkipInterval = 8; // 8프레임마다 1번 처리 (더 적극적으로 스킵)
   DateTime? _lastProcessTime;
-  static const Duration _minProcessInterval = Duration(
-    milliseconds: 800,
-  ); // 최소 500ms 간격 (더 긴 간격)
+  static const Duration _minProcessInterval = Duration(milliseconds: 800);
 
   // 처리 중인지 확인하는 플래그
   bool _isProcessing = false;
@@ -94,7 +92,6 @@ class DetectorService {
       return const <DetectedDefect>[];
     }
 
-    // 프레임 스킵 로직
     _frameCounter++;
 
     // 탐지가 일시 중지된 경우 스킵
@@ -137,7 +134,6 @@ class DetectorService {
     _consecutiveSkips = 0; // 처리 시작 시 연속 스킵 카운터 리셋
 
     try {
-      // silent
       // 원본 이미지 크기 저장
       final originalWidth = cameraImage.width;
       final originalHeight = cameraImage.height;
@@ -203,17 +199,13 @@ class DetectorService {
             .toList();
       }
 
-      // silent
-
       // 성공 시 캐시 업데이트 (박스 유지 강화)
       _lastDetections = detections;
       return detections;
     } catch (e) {
       if (kDebugMode) {
-        // ignore: avoid_print
         print('❌ 탐지 오류: $e');
       }
-      // 오류 발생 시에도 직전 결과 유지하여 박스가 사라지지 않도록 함
       return _lastDetections;
     } finally {
       _isProcessing = false; // 처리 완료 플래그 해제
@@ -243,7 +235,6 @@ class DetectorService {
 
     try {
       if (kDebugMode) {
-        // ignore: avoid_print
         print('🖼️ 갤러리 이미지 파일 읽기: $imagePath');
       }
 
@@ -253,14 +244,12 @@ class DetectorService {
 
       if (image == null) {
         if (kDebugMode) {
-          // ignore: avoid_print
           print('❌ 이미지를 디코딩할 수 없습니다.');
         }
         return [];
       }
 
       if (kDebugMode) {
-        // ignore: avoid_print
         print('🖼️ 이미지 디코딩 성공: ${image.width}x${image.height}');
       }
 
@@ -293,7 +282,6 @@ class DetectorService {
         dstY: padY.round(),
       );
 
-      // Float32List로 변환하고 정규화
       final input = Float32List(
         1 * modelInputSize.round() * modelInputSize.round() * 3,
       );
@@ -333,10 +321,8 @@ class DetectorService {
       );
 
       if (kDebugMode) {
-        // ignore: avoid_print
         print('🖼️ 갤러리 이미지 탐지 완료: ${detections.length}개 탐지됨');
         if (detections.isNotEmpty) {
-          // ignore: avoid_print
           print(
             '🖼️ 첫 번째 탐지: ${detections.first.label} (${(detections.first.confidence * 100).toStringAsFixed(1)}%)',
           );
@@ -346,7 +332,6 @@ class DetectorService {
       return detections;
     } catch (e) {
       if (kDebugMode) {
-        // ignore: avoid_print
         print('❌ 갤러리 이미지 탐지 오류: $e');
       }
       return [];
@@ -476,7 +461,6 @@ class DetectorService {
       // 모델 출력 검증
       if (output.isEmpty) {
         if (kDebugMode) {
-          // ignore: avoid_print
           print('⚠️ 모델 출력이 비어있습니다!');
         }
         return _createFallbackOutput(modelConfig);
@@ -485,7 +469,6 @@ class DetectorService {
       return output;
     } catch (e) {
       if (kDebugMode) {
-        // ignore: avoid_print
         print('❌ 모델 추론 오류: $e');
       }
       return _createFallbackOutput(modelConfig);
@@ -536,7 +519,6 @@ class DetectorService {
         modelConfig.numDetections *
         (modelConfig.numClasses + 5); // obj_score 포함 +5
     if (kDebugMode) {
-      // ignore: avoid_print
       print('🔧 Fallback 출력 생성: 크기 $size');
     }
     return Float32List(size);
@@ -557,7 +539,6 @@ class DetectorService {
     _consecutiveSkips = 0;
 
     if (kDebugMode) {
-      // ignore: avoid_print
       print('🧹 DetectorService 정리 완료');
     }
   }

@@ -8,6 +8,7 @@ class ThumbnailStrip extends StatefulWidget {
   final Function(Set<String>)? onGenerateReport;
   final List<XFile> selectedImages;
   final Function(XFile)? onImageDeleted;
+  final void Function(Set<String> selectedPaths)? onSelectionChanged;
 
   const ThumbnailStrip({
     super.key,
@@ -16,6 +17,7 @@ class ThumbnailStrip extends StatefulWidget {
     this.onGenerateReport,
     this.selectedImages = const [],
     this.onImageDeleted,
+    this.onSelectionChanged,
   });
 
   @override
@@ -36,23 +38,22 @@ class ThumbnailStripState extends State<ThumbnailStrip> {
     }
   }
 
-  void _toggleImageSelection(String imagePath) {
+  void _toggleSelection(String path) {
     setState(() {
-      if (_selectedImagePaths.contains(imagePath)) {
-        _selectedImagePaths.remove(imagePath);
+      if (_selectedImagePaths.contains(path)) {
+        _selectedImagePaths.remove(path);
       } else {
-        _selectedImagePaths.add(imagePath);
+        _selectedImagePaths.add(path);
       }
     });
+    widget.onSelectionChanged?.call(_selectedImagePaths);
   }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       height: 100,
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-      ),
+      decoration: BoxDecoration(color: Colors.grey[50]),
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -71,11 +72,7 @@ class ThumbnailStripState extends State<ThumbnailStrip> {
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.green[400]!, width: 2),
                   ),
-                  child: Icon(
-                    Icons.add,
-                    size: 40,
-                    color: Colors.green[700],
-                  ),
+                  child: Icon(Icons.add, size: 40, color: Colors.green[700]),
                 ),
               ),
             );
@@ -84,23 +81,19 @@ class ThumbnailStripState extends State<ThumbnailStrip> {
           // 썸네일 항목
           final image = widget.recentImages[index];
           final isSelected = _selectedImagePaths.contains(image.path);
-          
+
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: GestureDetector(
               onTap: () => widget.onImageSelected(image),
-              onLongPress: () => _toggleImageSelection(image.path),
+              onLongPress: () => _toggleSelection(image.path),
               child: Container(
                 width: 80,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                  border: isSelected ? Border.all(
-                    color: Colors.blue[600]!,
-                    width: 3,
-                  ) : Border.all(
-                    color: Colors.transparent,
-                    width: 2,
-                  ),
+                  border: isSelected
+                      ? Border.all(color: Colors.blue[600]!, width: 3)
+                      : Border.all(color: Colors.transparent, width: 2),
                 ),
                 child: Stack(
                   children: [
@@ -178,13 +171,13 @@ class ThumbnailStripState extends State<ThumbnailStrip> {
       ),
     );
   }
-  
+
   Set<String> get selectedImagePaths => _selectedImagePaths;
-  
+
   void clearSelection() {
     setState(() {
       _selectedImagePaths.clear();
     });
+    widget.onSelectionChanged?.call(_selectedImagePaths);
   }
 }
-

@@ -3,13 +3,12 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 /// PCB 결함 탐지 모델 설정 및 초기화 (YOLOv11n-seg 전이학습 모델)
 class PCBDefectModelConfig {
   static const int inputSize = 640;
-  static const double confidenceThreshold = 0.15;
-  static const double nmsThreshold = 0.5;
+  static const double confidenceThreshold = 0.15; // 신뢰도 임계값 0.15
+  static const double nmsThreshold = 0.5; // NMS 임계값 0.5
   static const bool agnosticNms = false;
   static const int maxDetections = 50;
-  static const String modelPath =
-      'assets/YOLO11n-seg-custom.tflite'; // YOLOv11n-seg 전이학습 모델
-  static const int cpuThreads = 4; // CPU 스레드 수
+  static const String modelPath = 'assets/YOLO11n-seg-custom.tflite';
+  static const int cpuThreads = 4;
 
   /// 탐지 가능한 결함 클래스 라벨들 (YOLOv11n-seg 전이학습 모델)
   static const List<String> classLabels = [
@@ -31,25 +30,26 @@ class PCBDefectModelConfig {
   static Future<Interpreter> initializeModel() async {
     try {
       final options = InterpreterOptions()
-        ..threads = cpuThreads // 멀티스레드 활성화
-        ..useNnApiForAndroid = true; // NNAPI로 하드웨어 가속
+        ..threads =
+            cpuThreads // 멀티스레드 활성화
+        ..useNnApiForAndroid = true;
 
       final interpreter = await Interpreter.fromAsset(
         modelPath,
         options: options,
       );
-      
+
       print('✅ YOLOv11n-seg CPU 멀티스레드($cpuThreads threads) 초기화 완료');
       return interpreter;
     } catch (e) {
       print('❌ 모델 로딩 실패: $e');
-      
+
       // NNAPI 실패 시 순수 CPU로 재시도
       try {
         final fallbackOptions = InterpreterOptions()
           ..threads = cpuThreads
-          ..useNnApiForAndroid = false; // XNNPACK 사용
-          
+          ..useNnApiForAndroid = false;
+
         final interpreter = await Interpreter.fromAsset(
           modelPath,
           options: fallbackOptions,
@@ -142,11 +142,7 @@ class PCBDefectModelConfig {
         numDetections: 8400,
         numClasses: classLabels.length,
         inputShape: [1, inputSize, inputSize, 3],
-        outputShape: [
-          1,
-          41,
-          8400,
-        ], // YOLOv11n-seg: 4(box) + 1(obj) + 4(classes) + 32(masks)
+        outputShape: [1, 41, 8400],
       );
     }
   }

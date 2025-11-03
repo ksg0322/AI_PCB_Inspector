@@ -16,22 +16,22 @@ class ReportGenerator {
     final doc = pw.Document();
 
     // 한글 지원 폰트 로드
-    final koreanFont = await _loadKoreanFont();
+    final notoSansFont = await _loadKoreanFont();
 
     // 한글 지원 폰트 스타일 정의
-    final arialBold = pw.TextStyle(
-      font: koreanFont,
+    final notoSansBold = pw.TextStyle(
+      font: notoSansFont,
       fontWeight: pw.FontWeight.bold,
     );
-    final arialNormal = pw.TextStyle(font: koreanFont);
-    final arialLarge = pw.TextStyle(
-      font: koreanFont,
-      fontSize: 18,
+    final notoSansNormal = pw.TextStyle(font: notoSansFont);
+    final notoSansLarge = pw.TextStyle(
+      font: notoSansFont,
+      fontSize: 24,
       fontWeight: pw.FontWeight.bold,
     );
-    final arialMedium = pw.TextStyle(
-      font: koreanFont,
-      fontSize: 14,
+    final notoSansMedium = pw.TextStyle(
+      font: notoSansFont,
+      fontSize: 20,
       fontWeight: pw.FontWeight.bold,
     );
 
@@ -47,19 +47,29 @@ class ReportGenerator {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              pw.Text('PCB 진단 리포트', style: arialLarge),
-              pw.SizedBox(height: 16),
-              pw.Text('리포트 생성 시간: $reportTime', style: arialNormal),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.end,
+                children: [
+                  pw.Text(' $reportTime', style: notoSansNormal),
+                ],
+              ),
               pw.SizedBox(height: 20),
-              pw.Text('검사 결과 요약', style: arialMedium),
-              pw.SizedBox(height: 8),
-              pw.Text(_buildSummary(defects), style: arialNormal),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.center,
+                children: [
+                  pw.Text('PCB 진단 리포트', style: notoSansLarge),
+                ],
+              ),
+              pw.SizedBox(height: 30),
+              pw.Text('검사 결과 요약', style: notoSansMedium),
+              pw.SizedBox(height: 10),
+              pw.Text(_buildSummary(defects), style: notoSansNormal),
               pw.SizedBox(height: 16),
               if (advisorSummary != null) ...[
-                pw.Text('AI 종합 의견', style: arialMedium),
-                pw.SizedBox(height: 8),
-                pw.Text(advisorSummary, style: arialNormal),
-                pw.SizedBox(height: 16),
+                pw.Text('AI 종합 의견', style: notoSansMedium),
+                pw.SizedBox(height: 10),
+                pw.Text(advisorSummary, style: notoSansNormal),
+                pw.SizedBox(height: 20),
               ],
             ],
           );
@@ -74,9 +84,9 @@ class ReportGenerator {
           doc,
           capturedImages[i],
           i + 1,
-          arialBold,
-          arialNormal,
-          arialMedium,
+          notoSansBold,
+          notoSansNormal,
+          notoSansMedium,
         );
       }
     }
@@ -96,9 +106,9 @@ class ReportGenerator {
     pw.Document doc,
     CapturedImage capturedImage,
     int imageNumber,
-    pw.TextStyle arialBold,
-    pw.TextStyle arialNormal,
-    pw.TextStyle arialMedium,
+    pw.TextStyle notoSansBold,
+    pw.TextStyle notoSansNormal,
+    pw.TextStyle notoSansMedium,
   ) async {
     try {
       // 결함이 표시된 이미지 생성
@@ -130,16 +140,16 @@ class ReportGenerator {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                pw.Text('촬영 이미지 #$imageNumber', style: arialMedium),
+                pw.Text('이미지 #$imageNumber', style: notoSansMedium),
                 pw.SizedBox(height: 8),
                 pw.Text(
                   '파일명: ${imageFile.path.split('/').last}',
-                  style: arialNormal,
+                  style: notoSansNormal,
                 ),
                 pw.SizedBox(height: 8),
                 pw.Text(
                   '탐지된 결함: ${capturedImage.defects.length}개',
-                  style: arialNormal,
+                  style: notoSansNormal,
                 ),
                 pw.SizedBox(height: 16),
                 // 이미지 표시 (크기 조정)
@@ -162,7 +172,7 @@ class ReportGenerator {
                 pw.SizedBox(height: 16),
                 // 결함 목록
                 if (capturedImage.defects.isNotEmpty) ...[
-                  pw.Text('이 이미지에서 탐지된 결함:', style: arialMedium),
+                  pw.Text('이 이미지에서 탐지된 결함:', style: notoSansMedium),
                   pw.SizedBox(height: 8),
                   ...capturedImage.defects.asMap().entries.map((entry) {
                     final index = entry.key + 1;
@@ -176,11 +186,11 @@ class ReportGenerator {
                         ),
                         child: pw.Row(
                           children: [
-                            pw.Text('$index. ', style: arialBold),
-                            pw.Text('${defect.label} ', style: arialNormal),
+                            pw.Text('$index. ', style: notoSansBold),
+                            pw.Text('${defect.label} ', style: notoSansNormal),
                             pw.Text(
                               '(신뢰도: ${(defect.confidence * 100).toInt()}%)',
-                              style: arialNormal,
+                              style: notoSansNormal,
                             ),
                           ],
                         ),
@@ -188,7 +198,7 @@ class ReportGenerator {
                     );
                   }),
                 ] else ...[
-                  pw.Text('이 이미지에서는 결함이 탐지되지 않았습니다.', style: arialNormal),
+                  pw.Text('이 이미지에서는 결함이 탐지되지 않았습니다.', style: notoSansNormal),
                 ],
               ],
             );

@@ -27,12 +27,13 @@ class StreamViewport extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final double viewW = constraints.maxWidth;
-        
+
         // maxHeight가 제공되면 사용, 아니면 안전한 폴백 값 사용
-        final double viewH = maxHeight ?? 
-                            (constraints.maxHeight.isFinite 
-                              ? constraints.maxHeight 
-                              : MediaQuery.of(context).size.height * 0.6);
+        final double viewH =
+            maxHeight ??
+            (constraints.maxHeight.isFinite
+                ? constraints.maxHeight
+                : MediaQuery.of(context).size.height * 0.5);
 
         Widget imageWidget;
         int srcW;
@@ -104,16 +105,16 @@ class StreamViewport extends StatelessWidget {
           // 가로 기준으로 이미지 크기 계산
           actualImageWidth = viewW;
           actualImageHeight = viewW / imageAspectRatio;
-          
+
           // maxHeight 제한 적용 (오버플로우 방지)
           if (actualImageHeight > viewH) {
             actualImageHeight = viewH;
             actualImageWidth = viewH * imageAspectRatio;
           }
-          
+
           offsetX = 0;
           offsetY = 0;
-          
+
           // 정확한 크기의 SizedBox 반환 → 여백 없음
           return SizedBox(
             width: actualImageWidth,
@@ -155,7 +156,7 @@ class StreamViewport extends StatelessWidget {
           offsetX = (viewW - actualImageWidth) / 2;
           offsetY = 0;
         }
-        
+
         return SizedBox(
           height: viewH, // 카메라 모드는 고정 높이
           child: Stack(

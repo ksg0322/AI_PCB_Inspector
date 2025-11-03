@@ -7,20 +7,33 @@ class AiAdvisorService {
   final String modelName;
   AiAdvisorService({this.modelName = 'gemini-2.5-flash-lite'});
 
-  Future<String> askAdvisor({required String defectLabel}) async {
+  Future<String> askAdvisorWithNoDefect({String message = ''}) async {
     final uri = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=${ApiKeys.geminiApiKey}',
     );
-    final prompt = AiPrompt.getPromptForDefects([defectLabel]);
 
     final body = {
+      'systemInstruction': {
+        'role': 'system',
+        'parts': [
+          {
+            'text': '''페르소나 설정 (역할 부여)
+당신의 목표는 발견된 PCB 결함을 정확하게 분석하고, 결함을 해결할 수 있도록 돕는 것입니다.
+답변은 100자 이내로 작성해주세요.''',
+          },
+        ],
+      },
       'contents': [
         {
           'parts': [
-            {'text': prompt},
+            {'text': (message.isEmpty) ? '안녕하세요.' : message},
           ],
         },
       ],
+      'generationConfig': {
+        'temperature': 0.5, // 약간의 창의성을 허용
+        'topP': 0.95,
+      },
     };
 
     final resp = await http.post(
@@ -42,7 +55,9 @@ class AiAdvisorService {
     return text ?? '응답 없음';
   }
 
-  Future<String> askAdvisorForMultipleDefects({required List<String> defectLabels}) async {
+  Future<String> askAdvisorForMultipleDefects({
+    required List<String> defectLabels,
+  }) async {
     final uri = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=${ApiKeys.geminiApiKey}',
     );
@@ -56,6 +71,10 @@ class AiAdvisorService {
           ],
         },
       ],
+      'generationConfig': {
+        'temperature': 0.3,
+        'topP': 0.90,
+      },
     };
 
     final resp = await http.post(

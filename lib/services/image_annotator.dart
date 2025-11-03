@@ -11,8 +11,6 @@ class ImageAnnotator {
     required String outputPath,
   }) async {
     try {
-      // silent
-
       // 원본 이미지 로드
       final originalFile = File(originalImagePath);
       if (!await originalFile.exists()) {
@@ -27,8 +25,6 @@ class ImageAnnotator {
         // silent
         return null;
       }
-
-      // silent
 
       // 결함 박스 그리기
       final annotatedImage = _drawDefectBoxes(originalImage, defects);

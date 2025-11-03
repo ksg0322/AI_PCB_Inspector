@@ -53,7 +53,7 @@ List<DetectedDefect> postprocessOutputAdvanced(
 
       if (detection.length < 5) continue;
 
-      // YOLOv8n-seg 헤드 해석: [cx, cy, w, h, cls0, cls1, cls2, cls3, mask_coeffs...]
+      // YOLOv11n-seg 헤드 해석: [cx, cy, w, h, cls0, cls1, cls2, cls3, mask_coeffs...]
       final objIndex = 4;
       final classStart = hasObjectness ? 5 : 4; // objectness 유무에 따라 조정
       final objectness = hasObjectness ? detection[objIndex] : 1.0;

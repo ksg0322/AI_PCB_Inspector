@@ -27,7 +27,7 @@ class ControlPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
-    
+
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: Column(
@@ -76,7 +76,7 @@ class ControlPanel extends StatelessWidget {
             ),
             const SizedBox(height: 8),
           ],
-          
+
           // 메인 탐지 버튼
           SizedBox(
             width: screenWidth * 0.8,
@@ -88,7 +88,10 @@ class ControlPanel extends StatelessWidget {
               ),
               label: Text(
                 isDetecting ? '사진 촬영' : '탐지',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: isDetecting ? Colors.orange : Colors.green,

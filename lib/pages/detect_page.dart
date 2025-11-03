@@ -12,17 +12,46 @@ import '../services/detect_page_controller.dart';
 import '../services/photo_saver.dart';
 import '../widgets/stream_viewport.dart';
 import '../widgets/defect_summary_panel.dart';
-import '../widgets/ai_response_panel.dart';
 import '../widgets/thumbnail_strip.dart';
 
 class DetectPage extends StatefulWidget {
-  const DetectPage({super.key});
+  final Function(List<DetectedDefect>)? onDefectsUpdated;
+  final Function(String?)? onAdvisorTextUpdated;
+  final Function(List<CapturedImage>)? onCapturedImagesUpdated;
+  final Function(List<XFile>)? onRecentImagesUpdated;
+  final Function(XFile?)? onGalleryImageUpdated;
+  final Function(XFile?)? onCapturedImageUpdated;
+  final Function(List<DetectedDefect>)? onSelectedDefectsUpdated;
+  final Function(String?)? onAiResponseReady;
+  final List<CapturedImage>? initialCapturedImages;
+  final List<XFile>? initialRecentImages;
+  final XFile? initialGalleryImage;
+  final XFile? initialCapturedImage;
+  final String? advisorText;
+
+  const DetectPage({
+    super.key,
+    this.onDefectsUpdated,
+    this.onAdvisorTextUpdated,
+    this.onCapturedImagesUpdated,
+    this.onRecentImagesUpdated,
+    this.onGalleryImageUpdated,
+    this.onCapturedImageUpdated,
+    this.onSelectedDefectsUpdated,
+    this.onAiResponseReady,
+    this.initialCapturedImages,
+    this.initialRecentImages,
+    this.initialGalleryImage,
+    this.initialCapturedImage,
+    this.advisorText,
+  });
 
   @override
   State<DetectPage> createState() => _DetectPageState();
 }
 
-class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
+class _DetectPageState extends State<DetectPage>
+    with WidgetsBindingObserver, AutomaticKeepAliveClientMixin<DetectPage> {
   final DetectorService _detector = DetectorService();
   late final DetectPageController _pageController;
   final AiAdvisorService _advisor = AiAdvisorService();
@@ -36,7 +65,6 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   bool _isCameraInitialized = false;
   bool _isDetecting = false;
   List<DetectedDefect> _latest = const [];
-  String? _advisorText;
   bool _isInitializingCamera = false;
 
   bool _inferenceBusy = false;
@@ -47,12 +75,21 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   XFile? _capturedImage;
   List<CapturedImage> _capturedImages = [];
   List<XFile> _recentImages = [];
+  List<DetectedDefect> _selectedDefectsSummary = [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _pageController = DetectPageController(_detector);
+
+    // 초기 상태 설정
+    _capturedImages = widget.initialCapturedImages ?? [];
+    _recentImages = widget.initialRecentImages ?? [];
+    _galleryImage = widget.initialGalleryImage;
+    _capturedImage = widget.initialCapturedImage;
+    _selectedDefectsSummary = [];
+
     _initialize();
   }
 
@@ -143,18 +180,21 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
 
   Future<void> _startDetectAndCamera() async {
     if (_isDetecting) return;
-    
+
     setState(() {
       _galleryImage = null;
       _capturedImage = null;
       _latest = [];
     });
-    
+    widget.onDefectsUpdated?.call(_latest);
+    widget.onGalleryImageUpdated?.call(_galleryImage);
+    widget.onCapturedImageUpdated?.call(_capturedImage);
+
     if (!_isCameraInitialized) {
       await _initializeCamera();
       if (!_isCameraInitialized) return;
     }
-    
+
     await _startDetect();
   }
 
@@ -195,6 +235,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
 
         if (mounted && _isDetecting) {
           setState(() => _latest = results);
+          widget.onDefectsUpdated?.call(_latest);
         }
 
         try {
@@ -233,31 +274,35 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _askAi() async {
+  Future<String?> _askAi() async {
     try {
-      final validDefects = _latest;
-      if (validDefects.isEmpty) {
-        setState(() => _advisorText = '탐지된 불량이 없습니다.');
-        return;
+      // 썸네일에서 선택된 결함이 있으면 그것을 우선 사용, 없으면 현재 활성 이미지의 결함 사용
+      final defectsToQuery = _selectedDefectsSummary.isNotEmpty
+          ? _selectedDefectsSummary
+          : _latest;
+
+      if (defectsToQuery.isEmpty) {
+        // 결함 정보가 없을 때 전용 메서드 사용 (빈 프롬프트)
+        return await _advisor.askAdvisorWithNoDefect();
       }
 
       // 탐지된 모든 불량의 라벨을 수집
-      final defectLabels = validDefects.map((defect) => defect.label).toSet().toList();
-      
-      String text;
-      if (defectLabels.length == 1) {
-        // 단일 불량인 경우 기존 방식 사용
-        text = await _advisor.askAdvisor(defectLabel: defectLabels.first);
-      } else {
-        // 여러 불량인 경우 새로운 방식 사용
-        text = await _advisor.askAdvisorForMultipleDefects(defectLabels: defectLabels);
-      }
+      final defectLabels =
+          defectsToQuery.map((defect) => defect.label).toSet().toList();
 
-      setState(() => _advisorText = text);
+      // 단일/다중 모두 다중 전용 메서드로 통일
+      return await _advisor.askAdvisorForMultipleDefects(
+        defectLabels: defectLabels,
+      );
     } catch (e) {
       debugLog('❌ AI 문의 오류: $e');
-      setState(() => _advisorText = 'AI 응답을 가져오는 중 오류가 발생했습니다: $e');
+      return 'AI 응답을 가져오는 중 오류가 발생했습니다: $e';
     }
+  }
+
+  Future<void> _handleAskAiPressed() async {
+    final text = await _askAi();
+    widget.onAiResponseReady?.call(text);
   }
 
   Future<void> _capturePhoto() async {
@@ -280,9 +325,17 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
       if (_isCameraInitialized) await _disposeCamera();
 
       await Future.delayed(const Duration(milliseconds: 300));
-      final capturedDefects = await _pageController.detectOnImagePath(image.path);
+      final capturedDefects = await _pageController.detectOnImagePath(
+        image.path,
+      );
       final savedPath = await PhotoSaver.savePhotoToGallery(image);
-      final capturedImage = await _pageController.buildCaptured(image.path, capturedDefects);
+      final capturedImage = await _pageController.buildCaptured(
+        image.path,
+        capturedDefects,
+      );
+
+      // 새 이미지 캡처 시 썸네일 선택 초기화
+      _thumbnailStripKey.currentState?.clearSelection();
 
       setState(() {
         _capturedImages.add(capturedImage);
@@ -295,10 +348,15 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
           _recentImages.removeLast();
         }
       });
+      widget.onDefectsUpdated?.call(_latest);
+      widget.onCapturedImagesUpdated?.call(_capturedImages);
+      widget.onRecentImagesUpdated?.call(_recentImages);
+      widget.onCapturedImageUpdated?.call(_capturedImage);
 
       if (mounted) {
         final saveStatus = savedPath != null ? '저장되었습니다' : '저장에 실패했습니다';
-        final message = '사진이 $saveStatus. ${capturedDefects.length}개의 결함이 탐지되었습니다.';
+        final message =
+            '사진이 $saveStatus. ${capturedDefects.length}개의 결함이 탐지되었습니다.';
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -324,10 +382,21 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     if (_isDetecting) await _stopDetect();
     if (_isCameraInitialized) await _disposeCamera();
 
+    // 현재 선택된 썸네일 목록 가져오기
+    final selectedPaths =
+        _thumbnailStripKey.currentState?.selectedImagePaths ?? {};
+
+    // 새로 선택된 이미지가 기존 선택 목록에 없는 경우에만 선택 초기화
+    if (selectedPaths.isNotEmpty && !selectedPaths.contains(image.path)) {
+      _thumbnailStripKey.currentState?.clearSelection();
+    }
+
     setState(() {
       _galleryImage = image;
       _capturedImage = image;
     });
+    widget.onGalleryImageUpdated?.call(_galleryImage);
+    widget.onCapturedImageUpdated?.call(_capturedImage);
 
     final results = await _pageController.detectOnImagePath(image.path);
 
@@ -341,6 +410,8 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
         }
       }
     });
+    widget.onDefectsUpdated?.call(_latest);
+    widget.onRecentImagesUpdated?.call(_recentImages);
 
     if (results.isNotEmpty) {
       final description = _pageController.buildDefectDescription(results);
@@ -351,23 +422,41 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
         description: description,
       );
 
-      setState(() {
-        _capturedImages.add(capturedImage);
-      });
+      // 중복 추가 방지
+      final isAlreadyAdded = _capturedImages
+          .any((img) => img.imagePath == capturedImage.imagePath);
+
+      if (!isAlreadyAdded) {
+        setState(() {
+          _capturedImages.add(capturedImage);
+        });
+        widget.onCapturedImagesUpdated?.call(_capturedImages);
+      }
     }
   }
 
   Future<void> _handleImageDeleted(XFile image) async {
+    // 썸네일 선택 초기화
+    // _thumbnailStripKey.currentState?.clearSelection();
+
     setState(() {
       _recentImages.removeWhere((img) => img.path == image.path);
-      _capturedImages.removeWhere((captured) => captured.imagePath == image.path);
-      
-      if (_galleryImage?.path == image.path || _capturedImage?.path == image.path) {
+      _capturedImages.removeWhere(
+        (captured) => captured.imagePath == image.path,
+      );
+
+      if (_galleryImage?.path == image.path ||
+          _capturedImage?.path == image.path) {
         _galleryImage = null;
         _capturedImage = null;
         _latest = [];
       }
     });
+    widget.onCapturedImagesUpdated?.call(_capturedImages);
+    widget.onRecentImagesUpdated?.call(_recentImages);
+    widget.onGalleryImageUpdated?.call(_galleryImage);
+    widget.onCapturedImageUpdated?.call(_capturedImage);
+    widget.onDefectsUpdated?.call(_latest);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -377,6 +466,26 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
         ),
       );
     }
+  }
+
+  Future<void> _handleThumbnailSelectionChanged(Set<String> selectedPaths) async {
+    if (selectedPaths.isEmpty) {
+      setState(() {
+        _selectedDefectsSummary = [];
+      });
+      widget.onSelectedDefectsUpdated?.call(_selectedDefectsSummary);
+      return;
+    }
+
+    final summaryDefects = _capturedImages
+        .where((img) => selectedPaths.contains(img.imagePath))
+        .expand((img) => img.defects)
+        .toList();
+
+    setState(() {
+      _selectedDefectsSummary = summaryDefects;
+    });
+    widget.onSelectedDefectsUpdated?.call(_selectedDefectsSummary);
   }
 
   Future<void> _makeReportFromSelectedThumbnails(
@@ -416,7 +525,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     // 리포트 생성
     await _report.generateAndShare(
       defects: selectedDefects,
-      advisorSummary: _advisorText,
+      advisorSummary: widget.advisorText,
       capturedImages: selectedCapturedImages,
     );
 
@@ -445,13 +554,13 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
   Color _getDefectColor(String label) =>
       DefectOverlayUtil.getFlutterColor(label);
 
-  List<Widget> _buildDefectChips() {
-    if (_latest.isEmpty) return [];
+  List<Widget> _buildDefectChips(List<DetectedDefect> defects) {
+    if (defects.isEmpty) return [];
 
     final Map<String, int> defectCounters = {};
     final List<Widget> chips = [];
 
-    for (final defect in _latest) {
+    for (final defect in defects) {
       defectCounters[defect.label] = (defectCounters[defect.label] ?? 0) + 1;
       final defectNumber = defectCounters[defect.label]!;
 
@@ -470,11 +579,11 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
     return chips;
   }
 
-  List<Widget> _buildDefectSummaryChips() {
-    if (_latest.isEmpty) return [];
+  List<Widget> _buildDefectSummaryChips(List<DetectedDefect> defects) {
+    if (defects.isEmpty) return [];
 
     final Map<String, int> defectCounts = {};
-    for (final defect in _latest) {
+    for (final defect in defects) {
       defectCounts[defect.label] = (defectCounts[defect.label] ?? 0) + 1;
     }
 
@@ -546,8 +655,11 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final screenHeight = MediaQuery.of(context).size.height;
-    final safeHeight = MediaQuery.of(context).padding.top + MediaQuery.of(context).padding.bottom;
+    final safeHeight =
+        MediaQuery.of(context).padding.top +
+        MediaQuery.of(context).padding.bottom;
     final maxImageHeight = (screenHeight - safeHeight) * 0.5;
 
     return Scaffold(
@@ -568,23 +680,39 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
               onImageSelected: _handleImageSelected,
               onGenerateReport: _makeReportFromSelectedThumbnails,
               onImageDeleted: _handleImageDeleted,
+              onSelectionChanged: _handleThumbnailSelectionChanged,
             ),
             Container(
               padding: const EdgeInsets.all(8.0),
               child: SizedBox(
                 width: MediaQuery.of(context).size.width * 0.8,
                 child: ElevatedButton.icon(
-                  onPressed: _isDetecting ? _captureAndStop : _startDetectAndCamera,
-                  icon: Icon(_isDetecting ? Icons.camera : Icons.play_arrow, size: 20),
+                  onPressed: _isDetecting
+                      ? _captureAndStop
+                      : _startDetectAndCamera,
+                  icon: Icon(
+                    _isDetecting ? Icons.camera : Icons.play_arrow,
+                    size: 20,
+                  ),
                   label: Text(
                     _isDetecting ? '사진 촬영' : '탐지',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _isDetecting ? Colors.orange : Colors.green,
+                    backgroundColor: _isDetecting
+                        ? Colors.orange
+                        : Colors.green,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
               ),
@@ -594,20 +722,23 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_latest.isNotEmpty) ...[
+                    if (_latest.isNotEmpty || _selectedDefectsSummary.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      DefectSummaryPanel(
-                        totalCount: _latest.length,
-                        summaryChips: _buildDefectSummaryChips(),
-                        detailChips: _buildDefectChips(),
-                        onGenerateReport: _makeReportFromSelectedOrAll,
-                        onAskAi: _askAi,
-                      ),
+                      Builder(builder: (context) {
+                        final defectsForSummary =
+                            _selectedDefectsSummary.isNotEmpty
+                                ? _selectedDefectsSummary
+                                : _latest;
+                        return DefectSummaryPanel(
+                          totalCount: defectsForSummary.length,
+                          summaryChips: _buildDefectSummaryChips(defectsForSummary),
+                          detailChips: _buildDefectChips(defectsForSummary),
+                          onGenerateReport: _makeReportFromSelectedOrAll,
+                          onAskAi: _handleAskAiPressed,
+                        );
+                      }),
                     ],
-                    if (_advisorText != null) ...[
-                      const SizedBox(height: 8),
-                      AiResponsePanel(text: _advisorText!),
-                    ],
+                    // AI 응답은 채팅 탭에서만 표시
                   ],
                 ),
               ),
@@ -617,4 +748,7 @@ class _DetectPageState extends State<DetectPage> with WidgetsBindingObserver {
       ),
     );
   }
+
+  @override
+  bool get wantKeepAlive => true;
 }

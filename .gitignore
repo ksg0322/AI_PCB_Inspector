@@ -48,5 +48,32 @@ app.*.map.json
 .cursor/
 
 # Configuration files
-lib/config/api_keys.dart
-.cursor/rules/rule.mdc
+lib/config/
+.cursor/rules/
+
+# Security sensitive files
+*.keystore
+*.jks
+key.properties
+android/local.properties
+ios/Runner.xcodeproj/project.xcworkspace/xcuserdata/
+ios/Runner.xcworkspace/xcuserdata/
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+secrets.json
+credentials.json
+
+# OS specific
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
